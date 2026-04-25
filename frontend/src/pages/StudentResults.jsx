@@ -45,6 +45,47 @@ export default function StudentResults() {
   // actually cleared it (i.e. did not get F / Ab / Dt).
   const isCleared = (s) => s.back && !s.back_pending;
 
+  // Print-only mini profile shared between the overview card and every
+  // semester card so each printed page begins with the student's identity.
+  const PrintProfile = () => (
+    <div className="print-profile hidden print:block mb-6 pb-4 border-b border-stone-300">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-semibold">
+            GBPIET · Govind Ballabh Pant Institute of Engineering &amp; Technology
+          </p>
+          <p className="font-display text-xl mt-1">
+            {student.name || "Student"}
+          </p>
+        </div>
+        <div className="font-mono text-[11px] text-stone-700 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
+          <div>
+            <span className="text-stone-500">Roll:</span>{" "}
+            <span className="font-semibold">{student.roll_no}</span>
+          </div>
+          <div>
+            <span className="text-stone-500">Enrollment:</span>{" "}
+            <span>{student.enroll_no || "—"}</span>
+          </div>
+          <div className="col-span-2">
+            <span className="text-stone-500">Branch:</span>{" "}
+            <span>{student.branch || "—"}</span>
+          </div>
+          <div>
+            <span className="text-stone-500">Batch:</span>{" "}
+            <span>{student.batch || "—"}</span>
+          </div>
+          {student.program && (
+            <div className="col-span-3">
+              <span className="text-stone-500">Programme:</span>{" "}
+              <span>{student.program}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   // Pre-compute running cumulative earned credits keyed by semester roman.
   // Iterate in ascending semester order (I → VIII) regardless of display order.
   const ASC_SEMS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
@@ -98,7 +139,7 @@ export default function StudentResults() {
         {/* Legend */}
         <Card
           data-testid="legend-card"
-          className="bg-white border border-stone-200 px-6 py-4 rounded-sm shadow-none flex flex-wrap items-center gap-6 text-xs font-mono"
+          className="bg-white border border-stone-200 px-6 py-4 rounded-sm shadow-none flex flex-wrap items-center gap-6 text-xs font-mono print:hidden"
         >
           <div className="flex items-center gap-2">
             <span className="subject-back text-xs">*</span>
@@ -112,7 +153,7 @@ export default function StudentResults() {
         {/* Student card */}
         <Card
           data-testid="student-card"
-          className="bg-white border border-stone-200 p-8 md:p-10 shadow-sm rounded-sm paper-surface fade-up"
+          className="bg-white border border-stone-200 p-8 md:p-10 shadow-sm rounded-sm paper-surface fade-up print:hidden"
         >
           <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
             Student profile
@@ -162,8 +203,9 @@ export default function StudentResults() {
         {ordered.length > 0 && (
           <Card
             data-testid="semester-summary-card"
-            className="bg-white border border-stone-200 p-8 md:p-10 rounded-sm shadow-sm fade-up"
+            className="overview-card semester-card bg-white border border-stone-200 p-8 md:p-10 rounded-sm shadow-sm fade-up"
           >
+            <PrintProfile />
             <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
               Academic summary
             </p>
@@ -245,40 +287,7 @@ export default function StudentResults() {
               style={{ animationDelay: `${idx * 80}ms` }}
             >
               {/* Print-only mini profile — repeats at the top of every printed semester page */}
-              <div className="print-profile hidden print:block mb-6 pb-4 border-b border-stone-300">
-                <div className="flex items-baseline justify-between gap-4 flex-wrap">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-semibold">
-                      GBPIET · Govind Ballabh Pant Institute of Engineering &amp; Technology
-                    </p>
-                    <p className="font-display text-xl mt-1">{student.name || "Student"}</p>
-                  </div>
-                  <div className="font-mono text-[11px] text-stone-700 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
-                    <div>
-                      <span className="text-stone-500">Roll:</span>{" "}
-                      <span className="font-semibold">{student.roll_no}</span>
-                    </div>
-                    <div>
-                      <span className="text-stone-500">Enrollment:</span>{" "}
-                      <span>{student.enroll_no || "—"}</span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-stone-500">Branch:</span>{" "}
-                      <span>{student.branch || "—"}</span>
-                    </div>
-                    <div>
-                      <span className="text-stone-500">Batch:</span>{" "}
-                      <span>{student.batch || "—"}</span>
-                    </div>
-                    {student.program && (
-                      <div className="col-span-3">
-                        <span className="text-stone-500">Programme:</span>{" "}
-                        <span>{student.program}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <PrintProfile />
 
               <div className="flex items-end justify-between flex-wrap gap-4">
                 <div>
