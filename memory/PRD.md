@@ -27,7 +27,8 @@
 ## Implemented Timeline
 - **2026-04-25 v1**: Base portal — admin auth, PDF parsers, SEM-Excel back detection, TC*/GS* regeneration, student portal w/ DOB. (i1, 14/14 tests pass)
 - **2026-04-25 v1.1**: DOB removed for students; institute & UTU logos embedded in regenerated PDF headers. (i2, 17/17 tests pass)
-- **2026-04-25 v1.2**: Excel-only generation pipeline — single Excel → all-semester TC*/GS* PDFs; Code-128 barcode on every GS page. New endpoints `POST /api/admin/uploads/excel`, `GET /api/admin/files/{id}/sem/{sem}/{kind}`. New tabbed Upload UI; Generated Files now expandable per-semester. (i3, 24/24 tests pass)
+- **2026-04-25 v1.2**: Excel-only generation pipeline — single Excel → all-semester TC*/GS* PDFs; Code-128 barcode on every GS page. (i3, 24/24 tests pass)
+- **2026-04-25 v1.3**: TC PDF promoted to A3 portrait with all 8 columns (Code, Name, Credits, External, Sessional, Total, Grade, Grade Points) + computed totals row + enrollment in info bar. GS PDF: SL.NO replaced by top-right barcode, "PROVISIONAL" dropped from title, signature row now includes Director. Ordinance grade reference (M.Tech ordinance for M.Tech; AC-2025 §22.10 for B.Tech/MCA) appended on a single appendix page at the end of the GS document. Student portal heading renamed "Results". (i4, 31/33 → i5, 33/33 tests pass)
 
 ## What's Mocked
 - Nothing.
