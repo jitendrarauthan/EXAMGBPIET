@@ -399,10 +399,7 @@ class TestI4TcPdf:
             # Director signature
             full_text = "\n".join(p.get_text() for p in doc)
             assert "Director" in full_text, "TC missing 'Director' signature"
-            # Grade reference is rendered on the LAST page only (memory-aware)
-            last_text = doc[-1].get_text()
-            assert ("Letter Grade" in last_text or "Grade Point" in last_text), \
-                "TC last page missing Grade Reference table"
+            # Iteration 7: Grade reference block REMOVED from TC PDF (verified separately)
         finally:
             doc.close()
 
@@ -483,42 +480,16 @@ class TestI4GsPdf:
 
 
 class TestI4GradeReference:
-    """Grade reference must switch between B.Tech (2025 AC) and M.Tech ordinance."""
+    """Iteration 7: grade reference block removed from PDFs.
+    Skipping these legacy tests; coverage moved to iteration_7 suite."""
 
+    @pytest.mark.skip(reason="iteration 7 removed grade reference table from PDFs")
     def test_btech_grade_table_btech_reference(self, session, auth_headers, upload_excel_only):
-        uid = upload_excel_only["upload_id"]
-        gs_sem = next((s["semester"] for s in upload_excel_only["semesters"]
-                        if s["gs_file"]), None)
-        r = session.get(f"{API}/admin/files/{uid}/sem/{gs_sem}/gs",
-                        headers=auth_headers, timeout=60)
-        doc = fitz.open(stream=r.content, filetype="pdf")
-        try:
-            full = "\n".join(p.get_text() for p in doc)
-            # B.Tech 2025 table has the 'E+' / 'E' / 'D+' rows that M.Tech does not
-            assert ("E+" in full) or ("D+" in full), \
-                "B.Tech grade-ref table not rendered (missing E+/D+ rows)"
-            # The M.Tech-only labels should NOT appear
-            assert "Outstanding" not in full, \
-                "B.Tech PDF erroneously contains M.Tech 'Outstanding' label"
-        finally:
-            doc.close()
+        pass
 
+    @pytest.mark.skip(reason="iteration 7 removed grade reference table from PDFs")
     def test_mtech_grade_table_mtech_reference(self, session, auth_headers, upload_excel_only_mtech):
-        uid = upload_excel_only_mtech["upload_id"]
-        gs_sem = next((s["semester"] for s in upload_excel_only_mtech["semesters"]
-                        if s["gs_file"]), None)
-        assert gs_sem, "M.Tech excel produced no GS sheets"
-        r = session.get(f"{API}/admin/files/{uid}/sem/{gs_sem}/gs",
-                        headers=auth_headers, timeout=60)
-        assert r.status_code == 200
-        doc = fitz.open(stream=r.content, filetype="pdf")
-        try:
-            full = "\n".join(p.get_text() for p in doc)
-            for needle in ("Outstanding", "Excellent", "Pass", "Absent"):
-                assert needle in full, \
-                    f"M.Tech grade reference missing label: '{needle}'"
-        finally:
-            doc.close()
+        pass
 
 
 class TestI4EnrollmentPersistence:

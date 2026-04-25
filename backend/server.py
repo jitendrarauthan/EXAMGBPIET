@@ -11,7 +11,7 @@ import uuid
 import logging
 import json
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import bcrypt
 import jwt
@@ -384,6 +384,20 @@ async def upload_excel_only(
     sem_results: List[dict] = []
     rolls_known: dict = {}
     total_back_marks = 0
+    # Build a per-roll, per-sem summary of SGPA/CGPA/etc. for embedding into GS.
+    all_sem_summary: Dict[str, Dict[str, Dict[str, str]]] = {}
+    for sem in semesters_seen:
+        for rec in tc_gs["GS"].get(sem, []) or tc_gs["TC"].get(sem, []):
+            roll = rec.get("roll_no", "")
+            if not roll:
+                continue
+            all_sem_summary.setdefault(roll, {})[sem] = {
+                "sgpa": rec.get("sgpa", ""),
+                "cgpa": rec.get("cgpa", ""),
+                "earned_credits": rec.get("earned_credits", ""),
+                "result": rec.get("result", ""),
+            }
+
     for sem in semesters_seen:
         back_map = sem_back.get(sem, {})
         tc_records = tc_gs["TC"].get(sem, [])
@@ -400,7 +414,10 @@ async def upload_excel_only(
             tc_out = tc_path.name
         gs_out = None
         if gs_records:
-            pdf_bytes = generate_gs_pdf(gs_records, program, branch, sem, exam_session, batch)
+            pdf_bytes = generate_gs_pdf(
+                gs_records, program, branch, sem, exam_session, batch,
+                all_sem_summary=all_sem_summary,
+            )
             gs_path = folder / f"GS_{sem}_starred.pdf"
             gs_path.write_bytes(pdf_bytes)
             gs_out = gs_path.name
@@ -548,9 +565,23 @@ async def download_student_gs(roll_no: str, semester: str,
         "result": res.get("result", ""),
         "remark": res.get("remark", ""),
         "earned_credits": res.get("earned_credits", ""),
+        "program": res.get("program", ""),
+        "branch": res.get("branch", ""),
+        "semester": res.get("semester", ""),
+        "exam_session": res.get("exam_session", ""),
     }
+    # Build full sem-history for this student
+    all_sem: Dict[str, Dict[str, Dict[str, str]]] = {roll_no: {}}
+    async for r in db.results.find({"roll_no": roll_no}, {"_id": 0}):
+        all_sem[roll_no][r["semester"]] = {
+            "sgpa": r.get("sgpa", ""),
+            "cgpa": r.get("cgpa", ""),
+            "earned_credits": r.get("earned_credits", ""),
+            "result": r.get("result", ""),
+        }
     pdf = generate_gs_pdf([rec], res["program"], res["branch"], res["semester"],
-                           res.get("exam_session", "December 2025"), res["batch"])
+                           res.get("exam_session", "December 2025"), res["batch"],
+                           all_sem_summary=all_sem)
     return StreamingResponse(io_bytes(pdf), media_type="application/pdf",
                               headers={"Content-Disposition": f'attachment; filename="GS_{roll_no}_{semester}.pdf"'})
 

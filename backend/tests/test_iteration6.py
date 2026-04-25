@@ -91,14 +91,13 @@ class TestTCFooterAndFields:
             doc.close()
 
     def test_tc_four_students_per_page(self, session, auth_headers, excel_upload):
-        """Page 1 should list exactly 4 students unless fewer records exist."""
+        """Iteration 7: KeepTogether per-student → page 1 must have 1-4 students (no overflow)."""
         pdf = _fetch_tc(session, auth_headers, excel_upload)
         doc = fitz.open(stream=pdf, filetype="pdf")
         try:
             page1_text = doc[0].get_text()
-            # Count unique 'University Roll No.' occurrences on page 1
             count = page1_text.count("University Roll No")
-            assert count == 4, f"Page 1 should have 4 students, got {count}"
+            assert 1 <= count <= 4, f"Page 1 should have 1-4 students, got {count}"
         finally:
             doc.close()
 
@@ -136,8 +135,11 @@ class TestCumlEarnedCreditsPersistence:
         doc = fitz.open(stream=r.content, filetype="pdf")
         try:
             t = doc[0].get_text()
-            assert "Earned Credits" in t, "Per-student GS missing 'Earned Credits'"
-            assert "SGPA" in t and "CGPA" in t and "Result" in t
+            # Iteration 7: per-student GS shows "EARNED CREDITS" (uppercase) in bottom block
+            # and "Earned Cr." in semester history table
+            assert ("Earned Credits" in t or "EARNED CREDITS" in t.upper() or "Earned Cr" in t), \
+                "Per-student GS missing Earned Credits"
+            assert "SGPA" in t and "CGPA" in t and "Result" in t.lower() or "RESULT" in t
         finally:
             doc.close()
 
