@@ -1091,11 +1091,12 @@ def _draw_gs_header(canv, doc):
 
     canv.setFont(_GS_TITLE_FONT, name_size)
     canv.drawCentredString(cx, top_y - 5 * mm, name_text)
-    canv.setFont("Helvetica-Bold", 10.5)
+    # Affiliation lines also use the GS title font for visual consistency.
+    canv.setFont(_GS_TITLE_FONT, 9.5)
     canv.drawCentredString(cx, top_y - 10 * mm, _INSTITUTE_LINES[1])
-    canv.setFont("Helvetica", 9)
-    canv.drawCentredString(cx, top_y - 14.5 * mm, _INSTITUTE_LINES[2])
-    canv.drawCentredString(cx, top_y - 18.5 * mm, _INSTITUTE_LINES[3])
+    canv.setFont(_GS_TITLE_FONT, 8)
+    canv.drawCentredString(cx, top_y - 14 * mm, _INSTITUTE_LINES[2])
+    canv.drawCentredString(cx, top_y - 17.5 * mm, _INSTITUTE_LINES[3])
     canv.restoreState()
 
 
@@ -1256,13 +1257,10 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         # every page, so the story starts directly with the GRADE SHEET title
         # band below.
 
-        # ---- Title band — programme / branch / semester+session each on its own line ----
+        # ---- "GRADE SHEET" header band — its own visual section ----
         title_band = Table([[Paragraph(
             "<para alignment='center'>"
-            "<font size='15' face='Helvetica-Bold' color='white'>GRADE SHEET</font><br/>"
-            f"<font size='11' face='Helvetica-Bold' color='white'>{program}</font><br/>"
-            f"<font size='10' color='white'>{branch}</font><br/>"
-            f"<font size='9.5' color='#cbd5e1'>{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
+            "<font size='17' face='Helvetica-Bold' color='white'>GRADE SHEET</font>"
             "</para>",
             st["sub"],
         )]], colWidths=[page_width_mm * mm])
@@ -1270,10 +1268,30 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1e1b4b")),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ]))
         story.append(title_band)
+        story.append(Spacer(1, 1.5 * mm))
+
+        # ---- Course / branch / semester+session — its own lighter section ----
+        course_band = Table([[Paragraph(
+            "<para alignment='center'>"
+            f"<font size='11' face='Helvetica-Bold' color='#1c1917'>{program}</font><br/>"
+            f"<font size='10' color='#1c1917'>{branch}</font><br/>"
+            f"<font size='9.5' color='#57534e'>{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
+            "</para>",
+            st["sub"],
+        )]], colWidths=[page_width_mm * mm])
+        course_band.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f5f5f4")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(course_band)
         story.append(Spacer(1, 3 * mm))
 
         # ---- Student details card ----
@@ -1285,7 +1303,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
                        st["label"])],
             [Paragraph("<font size='7.5' color='#57534e'><b>FATHER'S NAME</b></font>", st["small"]),
              Paragraph(f"<font size='10'><b>{rec.get('father_name','')}</b></font>", st["label"]),
-             Paragraph("<font size='7.5' color='#57534e'><b>UNIVERSITY ENROLLMENT NO.</b></font>", st["small"]),
+             Paragraph("<font size='7.5' color='#57534e'><b>UNIVERSITY ENROLL. NO.</b></font>", st["small"]),
              Paragraph(f"<font size='10' face='Helvetica-Bold'>{rec.get('enroll_no','')}</font>", st["label"])],
         ], colWidths=[34 * mm, 60 * mm, 40 * mm, 40 * mm])
         info.setStyle(TableStyle([
