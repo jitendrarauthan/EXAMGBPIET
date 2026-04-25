@@ -1,0 +1,109 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) with an Academic/Editorial twist",
+  "typography": {
+    "fonts": [
+      {
+        "role": "Admin Headings & Body",
+        "family": "IBM Plex Sans",
+        "weight": "400, 500, 600"
+      },
+      {
+        "role": "Student Portal Display/Header",
+        "family": "Playfair Display",
+        "weight": "600, 700"
+      },
+      {
+        "role": "Data / Tables / Marks",
+        "family": "IBM Plex Mono",
+        "weight": "400, 500"
+      }
+    ],
+    "scale": {
+      "h1": "text-4xl md:text-5xl tracking-tight",
+      "h2": "text-2xl md:text-3xl tracking-tight",
+      "h3": "text-xl",
+      "body": "text-base leading-relaxed",
+      "data": "text-sm font-mono tracking-tight",
+      "overline": "text-xs uppercase tracking-[0.2em] font-semibold"
+    }
+  },
+  "colors": {
+    "background": {
+      "page": "bg-stone-50",
+      "surface": "bg-white",
+      "surface_secondary": "bg-stone-100"
+    },
+    "text": {
+      "primary": "text-stone-900",
+      "secondary": "text-stone-500",
+      "muted": "text-stone-400"
+    },
+    "brand": {
+      "primary": "bg-indigo-950 text-white",
+      "primary_hover": "bg-indigo-900 text-white",
+      "accent": "bg-red-900 text-white",
+      "highlight": "bg-amber-100 text-amber-900 border-amber-200"
+    },
+    "borders": {
+      "default": "border-stone-200",
+      "focus": "ring-2 ring-indigo-950 ring-offset-2"
+    }
+  },
+  "layout_and_spacing": {
+    "admin_dashboard": {
+      "grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+      "surface_style": "cardless, crisp 1px borders, p-6, no shadow, bg-white",
+      "header": "solid border-b border-stone-200 bg-white"
+    },
+    "student_portal": {
+      "container": "max-w-4xl mx-auto px-4 py-12",
+      "surface_style": "bg-white shadow-sm border border-stone-200 p-8 md:p-12",
+      "transcript_grid": "grid-cols-1 gap-8"
+    }
+  },
+  "components": {
+    "strategy": "Shadcn UI customized heavily for high-density academic data",
+    "tables": "Dense, monospace font for numbers, sticky headers, text-sm, hover:bg-stone-50. Emphasize row highlighting for students with * subjects.",
+    "buttons": "Square or rounded-sm. High contrast. Primary uses indigo-950.",
+    "inputs": "Square or rounded-sm. Focus ring uses indigo-950.",
+    "badges": "For * subjects (backlogs), use amber/yellow muted background with dark amber text and 1px border. For regular subjects, use stone-100.",
+    "tabs": "Underline style, no pills. border-b-2 border-transparent data-[state=active]:border-indigo-950."
+  },
+  "motion": {
+    "admin": "Minimal. Fast transitions (150ms).",
+    "student": "Staggered fade-up (Framer Motion) for semester results to create a deliberate, official 'unveiling' feel.",
+    "hover": "Subtle background shifts, no heavy scaling."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "student_portal_login_background",
+        "url": "https://images.pexels.com/photos/19193975/pexels-photo-19193975.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Modern university campus building used for the student portal login page background. MUST be overlaid with bg-stone-900/60 for text contrast."
+      },
+      {
+        "category": "admin_dashboard_empty_state",
+        "url": "https://images.pexels.com/photos/35564755/pexels-photo-35564755.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Tree-lined campus walkway. Use in grayscale (grayscale class) and low opacity (opacity-20) as an empty state illustration for the admin file center."
+      }
+    ],
+    "icons": {
+      "library": "lucide-react",
+      "style": "stroke-width-1.5, sharp angles where possible."
+    }
+  },
+  "accessibility": {
+    "testing_attributes": "All interactable elements MUST have data-testid. e.g., data-testid='admin-login-button', data-testid='upload-tc-btn', data-testid='student-search-input'.",
+    "contrast": "Ensure pure black/dark grey on white for all data. Badges must pass 4.5:1 ratio."
+  },
+  "instructions_to_main_agent": [
+    "Install required fonts from Google Fonts: IBM Plex Sans, IBM Plex Mono, Playfair Display.",
+    "Configure Tailwind with the provided color scheme, mapping stone colors to the default grey/border variables.",
+    "Implement two separate layouts/routes: /admin (Dashboard, Data-heavy, side nav) and /student (Centered login, Transcript view).",
+    "For the Admin Upload Center, use Shadcn forms with custom dropzones for PDF and Excel.",
+    "For the Student Result view, design it like an official academic transcript: Serif headers for the University Name, mono for grades, with amber highlight badges for subjects containing the '*' marker.",
+    "Never use generic placeholder images. Use the provided Pexels university images.",
+    "Always use the 'data-testid' attributes for testing."
+  ]
+}
