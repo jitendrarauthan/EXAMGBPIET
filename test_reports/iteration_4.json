@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 4 — 31/33 backend pytest tests PASS (94%) on /app/backend/tests/test_portal_api.py. Verified TC PDF is A3 portrait (842x1191pt), totals row rendered, 'University Enrol' label and letter-grades present, Director signature, grade-reference on last page; GS PDF is A4 portrait (595x842pt), 'GRADE SHEET' title (no 'Provisional'/'SL.NO.'), barcode + 2 logos = 3 images on every sampled page (1, 50, 107), B.Tech grade reference table renders correctly (E+/D+ rows present, no 'Outstanding'), TC excel parser col-13 enrollment fix populates UTU/220xxxxxxx for known roll 220090170001 (verified via per-student GS PDF text). 2 NEW bugs surfaced: (a) CRITICAL — program_short() never matches 'M.Tech' or 'B.Tech' literal strings so M.Tech ordinance grade table is NEVER selected; M.Tech PDFs erroneously embed the B.Tech 2025 AC table. (b) HIGH — GS page 1 missing 'Director' signature row when the student record + 12-subject table + grade-reference exceed one page; signature flows to next page leaving the bulk of GS pages without it. Frontend smoke (admin login + /admin/upload tabs + /admin/files expand-rows + 14 per-sem download buttons + student portal results display) all pass on the live preview URL.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "processor.program_short / _grade_table_for_program", "issue": "program_short('M.Tech') returns 'PROG' (only matches 'Bachelor'/'Master of Computer'/'Master'). Therefore _grade_table_for_program falls through to _GRADE_TABLE_BTECH_MCA_2025 even for M.Tech uploads, so the M.Tech ordinance grade table (Outstanding/Excellent/Pass/Absent rows) is NEVER rendered. Verified: uploaded aiml.xlsx as program='M.Tech' and PDF text contains B.Tech table (E+/D+ rows) instead of M.Tech labels.", "priority": "CRITICAL"},
+      {"endpoint": "processor.generate_gs_pdf layout", "issue": "GS PDF page 1 lacks 'Director' / signature row when a student has ~12 subjects: the grade-reference table (~13 rows) plus signature overflow to a continuation page, so most GS pages render WITHOUT the new 4-cell Prepared by / Checked by / Director / Examination Controller signature. Verified on 1st student of TC_I excel-only output (B.Tech AIML, 2022). Page 2 of M.Tech upload contains the signature for the second student, confirming the row only appears on pages where layout fits.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/student results page", "issues": ["Page heading still reads 'Provisional Results' even though the GS PDF title was changed to 'GRADE SHEET' (Provisional dropped). User may want consistency on the web portal heading too — please confirm intent."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_portal_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix processor.program_short to recognise the literal short forms 'M.Tech', 'B.Tech', 'MCA' (currently only checks 'Bachelor'/'Master of Computer'/'Master'). Suggested: case-insensitive check on program string for 'M.TECH' / 'M TECH' / 'MTECH' → 'M. TECH', and 'B.TECH' / 'BTECH' → 'B. TECH', and 'MCA' → 'MCA' before falling through to the keyword check. This bug breaks the new M.Tech ordinance grade-table acceptance criterion.",
+    "Fix GS PDF layout so the signature row (Prepared by / Checked by / Director / Examination Controller) is GUARANTEED to appear on every student's first GS page. Options: (a) wrap the signature row inside ReportLab KeepInFrame with shrink behaviour, (b) reduce grade-reference table font to 6pt and tighten paddings further, (c) shrink the subject-table top padding and remove blank spacers above signature, (d) drop the grade-reference block from in-line GS layout and instead append it once on a single appendix page at the END of the GS doc (would also significantly reduce file size).",
+    "Confirm whether /student web heading should change from 'Provisional Results' to 'Results' to align with PDF title."
+  ],
+  "critical_code_review_comments": [
+    "processor.program_short — string-matching is brittle. The same function is used to derive prefixes throughout PDF rendering; any non-canonical input ('M.Tech', 'B.Tech') silently degrades to 'PROG' and propagates wrong data downstream. Use a normalised mapping table.",
+    "_grade_reference_block — 13-row table in 7pt is rendered inline on every GS page. For students with >10 subjects the page overflows. Consider always-on-last-page strategy (similar to TC) or smaller layout.",
+    "generate_gs_pdf signature row uses a fixed Table after the grade-ref block. There is no KeepTogether wrapper for [grade_ref + signature], so ReportLab freely splits them across pages.",
+    "TC PDF page-size bump A4→A3 (842x1191pt) verified — table now fits 8 columns. Good.",
+    "_compute_totals row rendered: text 'Total' appears multiple times in PDF — verified via fitz text extraction. Good.",
+    "Excel-only enrollment fix (col 13) is working — known roll 220090170001 → enroll_no UTU/2201100662 populated and rendered on GS PDF page (verified).",
+    "GS top-of-page barcode replaces SL.NO.: verified — every sampled page (1,50,107) of the 100+ page GS doc has 3+ images and zero 'SL. NO.' / 'PROVISIONAL' text.",
+    "Frontend AdminFiles + AdminUpload regression: tab-excel, tab-pdf, excel-submit-btn, expand-{id}, dl-sem-tc-{sem}/dl-sem-gs-{sem} all present. 9 uploads listed, 7 sem rows + 14 per-sem download buttons render on expand. No console errors.",
+    "Student portal still works without DOB; correct enrollment UTU/2501103814 rendered for roll 250090170001."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_portal_api.py (added TestI4TcPdf, TestI4GsPdf, TestI4GradeReference, TestI4EnrollmentPersistence — 9 new tests)"
+  ],
+  "success_rate": {"backend": "94% (31/33)", "frontend": "100%"},
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: 250090170001 / 220090170001 (no DOB).",
+  "seed_data_creation": "Reuses /app/samples/aiml.xlsx, tc.pdf, gs.pdf. Tests are idempotent (upserts). Two new excel-only uploads created during this run (B.Tech + M.Tech variant) appear in /admin/uploads.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "33 backend tests in /app/backend/tests/test_portal_api.py — runs in ~100s. Only 2 fail and both are real product bugs (M.Tech grade table never selected; GS Director missing on overflowed pages). After main agent fixes program_short() and GS layout (KeepTogether or last-page-only grade reference), re-run pytest backend/tests/test_portal_api.py -v --tb=short. Frontend was confirmed working; no need to re-test UI unless the layout changes break per-sem download endpoints (they shouldn't).",
+  "rca of the issue": "Bug 1 (M.Tech table) — RCA: processor.program_short() at /app/backend/processor.py:934-941 only matches keyword strings 'Bachelor'/'Master of Computer'/'Master'. The frontend ProgrammePicker submits the canonical short form ('M.Tech', 'B.Tech', 'MCA'), none of which contain those keywords, so the function falls through to 'PROG'. Then _grade_table_for_program() at line 980 checks `program_short(program) == 'M. TECH'` → False → returns B.Tech table. Reproduction: POST /api/admin/uploads/excel with program=M.Tech, then assert 'Outstanding' in extracted PDF text — fails. Mitigation: replace the keyword chain with `p = program.upper().replace(' ','').replace('.','')` then map 'MTECH'/'MASTER'→'M. TECH', 'MCA'/'MASTEROFCOMPUTER'→'MCA', 'BTECH'/'BACHELOR'→'B. TECH'. Bug 2 (GS Director missing) — RCA: generate_gs_pdf appends [grade_reference_block, signature_table] to the story without a KeepTogether or PageBreak guard. ReportLab splits a frame whenever the next flowable doesn't fit. For 12-subject students, the cumulative height of header+student-info+12-row subject table+totals+grade-ref(13 rows)+signature exceeds A4 portrait height (842pt). The signature flows to a new page, but new students PageBreak immediately to start their own page → many students' GS first page never renders the signature. Mitigation: wrap [grade_reference_block, signature_table] inside KeepTogether and reduce grade-ref font to 6pt; or render grade-ref ONLY on a single appendix page at end of GS doc."
+}

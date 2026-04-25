@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple
 import openpyxl
 import pdfplumber
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A3, A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
@@ -133,17 +133,17 @@ def parse_tc_excel_sheet(ws) -> List[dict]:
     for i in range(len(block_starts) - 1):
         r0, r1 = block_starts[i], block_starts[i + 1]
         rec: dict = {"subjects": []}
-        # student header row at r0+1 (Name | <Name> | | Father's Name: | <Father> | | University Roll No: | | <Roll> | | University Enrol. No: | <Enroll>)
+        # student header row at r0+1 (Name | <Name> | | Father's Name: | <Father> | | University Roll No: | | <Roll> | | University Enrol. No: | | <Enroll>)
         hdr_row = r0 + 1
         if hdr_row >= r1:
             continue
         rec["name"] = _norm(ws.cell(hdr_row, 2).value)
         rec["father_name"] = _norm(ws.cell(hdr_row, 5).value)
         rec["roll_no"] = _norm(ws.cell(hdr_row, 9).value)
-        rec["enroll_no"] = _norm(ws.cell(hdr_row, 12).value)
+        rec["enroll_no"] = _norm(ws.cell(hdr_row, 13).value)
         if not rec["roll_no"]:
             continue
-        # subjects: scan rows r0+3 .. r1-1; subject row has a code in col1 and grade in col 12 (or 13)
+        # subjects: scan rows r0+3 .. r1-1; subject row has a code in col1
         for rr in range(hdr_row + 2, r1):
             code = _norm(ws.cell(rr, 1).value)
             name = _norm(ws.cell(rr, 2).value)
@@ -151,8 +151,8 @@ def parse_tc_excel_sheet(ws) -> List[dict]:
             ext = _norm(ws.cell(rr, 7).value)
             ses = _norm(ws.cell(rr, 9).value)
             tot = _norm(ws.cell(rr, 11).value)
-            grade = _norm(ws.cell(rr, 12).value)
-            gp = _norm(ws.cell(rr, 13).value)
+            grade = _norm(ws.cell(rr, 13).value)
+            gp = _norm(ws.cell(rr, 14).value)
             low = code.lower()
             if not code or low.startswith("subject") or low.startswith("total"):
                 # Capture summary / result rows
@@ -645,12 +645,24 @@ def _styles():
 
 def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_roman: str,
                      exam_session: str = "December 2025") -> bytes:
+    """Tabulation Chart — A3 portrait, multiple students per page.
+
+    Columns: Subject Code | Subject Name | Credits | External Marks |
+             Sessional Marks | Total Marks | Grade | Grade Points.
+    A summary row totals all numeric columns; a result row carries SGPA / CGPA.
+    Each page repeats the institute / UTU header. Bottom of last page
+    includes the official ordinance grade reference table.
+    """
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=10 * mm,
-                             rightMargin=10 * mm, topMargin=8 * mm, bottomMargin=8 * mm)
+    page = A3  # A3 portrait
+    doc = SimpleDocTemplate(
+        buf, pagesize=page,
+        leftMargin=12 * mm, rightMargin=12 * mm,
+        topMargin=10 * mm, bottomMargin=10 * mm,
+    )
     st = _styles()
     story = []
-    page_width_mm = landscape(A4)[0] / mm - 20  # margins
+    page_width_mm = page[0] / mm - 24
 
     def header_block():
         story.append(_logo_header([
@@ -661,21 +673,25 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
             (f"<b>Tabulation Chart for {program}</b>", st["section"]),
             (branch, st["sub"]),
             (f"{semester_roman} Semester {exam_session}", st["sub"]),
-        ], total_width_mm=page_width_mm, logo_size_mm=22))
+        ], total_width_mm=page_width_mm, logo_size_mm=24))
         story.append(Spacer(1, 3 * mm))
 
     header_block()
 
-    students_per_page = 3
+    # A3 portrait is 297 mm wide → ~273 mm usable. We give names a wide column.
+    col_widths = [26 * mm, 95 * mm, 16 * mm, 28 * mm, 28 * mm, 28 * mm, 22 * mm, 26 * mm]
+    students_per_page = 4
+
     for idx, rec in enumerate(records):
-        # Student info
+        # Student info row (full bleed)
         info = [[
             Paragraph(f"<b>Name:</b> {rec.get('name','')}", st["label"]),
             Paragraph(f"<b>Father's Name:</b> {rec.get('father_name','')}", st["label"]),
-            Paragraph(f"<b>University Roll No:</b> {rec.get('roll_no','')}", st["label"]),
-            Paragraph(f"<b>University Enrol. No:</b> {rec.get('enroll_no','')}", st["label"]),
+            Paragraph(f"<b>University Roll No.:</b> {rec.get('roll_no','')}", st["label"]),
+            Paragraph(f"<b>University Enrol. No.:</b> {rec.get('enroll_no','')}", st["label"]),
         ]]
-        t_info = Table(info, colWidths=[70 * mm, 70 * mm, 65 * mm, 70 * mm])
+        info_widths = [70 * mm, 70 * mm, 65 * mm, 64 * mm]
+        t_info = Table(info, colWidths=info_widths)
         t_info.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
             ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.grey),
@@ -688,25 +704,40 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
         story.append(t_info)
 
         # Subject table
-        rows = [["Subject\nCode", "Subject Name", "Credits", "External\nMarks",
-                 "Sessional\nMarks", "Total\nMarks", "Grade", "Grade\nPoints"]]
+        rows = [[
+            "Subject\nCode", "Subject Name", "Credits", "External\nMarks",
+            "Sessional\nMarks", "Total\nMarks", "Grade", "Grade\nPoints",
+        ]]
         for s in rec.get("subjects", []):
             name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
             rows.append([
-                s["code"], name_para, s["credits"], s.get("external", ""),
-                s.get("sessional", ""), s.get("total", ""), s["grade"],
+                s["code"], name_para, s.get("credits", ""), s.get("external", ""),
+                s.get("sessional", ""), s.get("total", ""), s.get("grade", ""),
                 s.get("grade_points", ""),
             ])
-        # Summary row
-        rows.append(["Total Credits/ Marks/ Total Grade Points", "", "", "", "", "", "", ""])
-        # Result row
+        # ---- Totals row (computed) ----
+        totals = _compute_totals(rec.get("subjects", []))
         rows.append([
-            f"Result: {rec.get('result','')}", "",
-            f"Remark: {rec.get('remark','')}", "",
-            f"SGPA: {rec.get('sgpa','')}", "",
-            f"CGPA: {rec.get('cgpa','')}", "",
+            Paragraph("<b>Total Credits / Marks / Total Grade Points</b>", st["label"]),
+            "",
+            str(totals["credits"]),
+            totals["external"],
+            totals["sessional"],
+            totals["total"],
+            "",
+            f"{totals['grade_points']:.1f}",
         ])
-        col_widths = [22 * mm, 95 * mm, 16 * mm, 22 * mm, 22 * mm, 22 * mm, 18 * mm, 20 * mm]
+        # ---- Result / SGPA / CGPA row ----
+        rows.append([
+            Paragraph(f"<b>Result:</b> {rec.get('result','')}", st["label"]),
+            "",
+            Paragraph(f"<b>Remark:</b> {rec.get('remark','')}", st["label"]),
+            "",
+            Paragraph(f"<b>SGPA:</b> {rec.get('sgpa','')}", st["label"]),
+            "",
+            Paragraph(f"<b>CGPA:</b> {rec.get('cgpa','')}", st["label"]),
+            "",
+        ])
         t = Table(rows, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
@@ -714,17 +745,21 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("ALIGN", (2, 1), (-1, -3), "CENTER"),
             ("FONTSIZE", (0, 1), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("SPAN", (0, -2), (-1, -2)),  # summary spans
+            # Totals row spans the first 2 cols (label) and reuses individual cells for sums
+            ("SPAN", (0, -2), (1, -2)),
+            ("BACKGROUND", (0, -2), (-1, -2), colors.HexColor("#f5f5f4")),
+            ("FONTNAME", (0, -2), (-1, -2), "Helvetica-Bold"),
+            ("ALIGN", (2, -2), (-1, -2), "CENTER"),
+            # Result row span
             ("SPAN", (0, -1), (1, -1)),
             ("SPAN", (2, -1), (3, -1)),
             ("SPAN", (4, -1), (5, -1)),
             ("SPAN", (6, -1), (7, -1)),
-            ("BACKGROUND", (0, -2), (-1, -2), colors.HexColor("#f5f5f4")),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ]))
         story.append(t)
@@ -734,20 +769,27 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
             story.append(PageBreak())
             header_block()
 
-    # Footer (last page)
-    story.append(Spacer(1, 10 * mm))
-    story.append(Table([["Prepared by", "Checked by (Tabulators)", "Controller (GBPIET)",
-                          "Director (GBPIET)", "Controller (UTU)"]],
-                        colWidths=[55 * mm] * 5,
-                        style=TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                           ("FONTSIZE", (0, 0), (-1, -1), 8)])))
+    # Reference grade table at bottom of last page
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("<b>Grade Reference (per institute ordinance)</b>", st["label"]))
+    story.append(Spacer(1, 2 * mm))
+    story.append(_grade_reference_block(program))
+    story.append(Spacer(1, 8 * mm))
+    # Signature row — Director added per latest brief
+    story.append(Table([[
+        "Prepared by", "Checked by (Tabulators)",
+        "Controller (GBPIET)", "Director (GBPIET)", "Controller (UTU)",
+    ]], colWidths=[55 * mm] * 5,
+        style=TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                          ("FONTSIZE", (0, 0), (-1, -1), 9),
+                          ("TOPPADDING", (0, 0), (-1, -1), 14)])))
 
     doc.build(story)
     return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
-# Generate PDF — GS*  (Provisional Grade Sheet with asterisks)
+# Generate PDF — GS*  (Grade Sheet with asterisks + barcode)
 # ---------------------------------------------------------------------------
 
 
@@ -761,9 +803,27 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
     short = _branch_short(branch)
     page_width_mm = A4[0] / mm - 36  # margins
     for idx, rec in enumerate(records):
-        sl_no = rec.get("sl_no") or f"{program_short(program)}/{short}/{batch}/{500 + idx + 1}"
-        # Top: SL.NO right-aligned
-        story.append(Paragraph(f"<b>SL. NO.: {sl_no}</b>", st["right"]))
+        # Top-right: barcode (replaces SL. NO. text per latest brief)
+        bc_top = _make_barcode_png(rec.get("roll_no", ""))
+        if bc_top is not None:
+            try:
+                top_bc = RLImage(bc_top, width=42 * mm, height=11 * mm)
+                top_bc.hAlign = "RIGHT"
+                top_table = Table(
+                    [["", top_bc]],
+                    colWidths=[(page_width_mm - 50) * mm, 50 * mm],
+                )
+                top_table.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]))
+                story.append(top_table)
+            except Exception:
+                pass
         story.append(_logo_header([
             (_INSTITUTE_LINES[0], st["title"]),
             (_INSTITUTE_LINES[1], st["sub"]),
@@ -771,7 +831,7 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
             (_INSTITUTE_LINES[3], st["small"]),
         ], total_width_mm=page_width_mm, logo_size_mm=24))
         story.append(Spacer(1, 3 * mm))
-        story.append(Paragraph("<b>PROVISIONAL GRADE SHEET</b>", st["section"]))
+        story.append(Paragraph("<b>GRADE SHEET</b>", st["section"]))
         story.append(Paragraph(program, st["sub"]))
         story.append(Paragraph(branch, st["sub"]))
         story.append(Paragraph(f"{semester_roman} Semester {exam_session}", st["sub"]))
@@ -837,42 +897,26 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
         ]))
         story.append(t)
 
-        # Barcode block — encodes university roll number; placed at bottom-right
-        # below the result table, above signatures. Always present (regardless
-        # of SL.NO).
-        bc_buf = _make_barcode_png(rec.get("roll_no", "") or sl_no)
-        if bc_buf is not None:
-            try:
-                bc_img = RLImage(bc_buf, width=55 * mm, height=14 * mm)
-                bc_table = Table(
-                    [[
-                        "",
-                        Paragraph(
-                            f"<para alignment='right'><font size='8'>{rec.get('roll_no','')}</font><br/>"
-                            f"<font size='6'>Verification barcode</font></para>",
-                            st["label"],
-                        ),
-                        bc_img,
-                    ]],
-                    colWidths=[80 * mm, 35 * mm, 59 * mm],
-                )
-                bc_table.setStyle(TableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]))
-                story.append(bc_table)
-            except Exception:
-                pass
+        # Ordinance grade reference (compact)
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(
+            "<font size='8'><b>Grade Reference</b> (per institute ordinance)</font>",
+            st["label"],
+        ))
+        story.append(Spacer(1, 1 * mm))
+        story.append(_grade_reference_block(program))
 
-        story.append(Spacer(1, 8 * mm))
-        story.append(Table([["Prepared by", "", "Checked by", "", "Examination Controller"]],
-                            colWidths=[35 * mm] * 5,
-                            style=TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                               ("FONTSIZE", (0, 0), (-1, -1), 9)])))
+        story.append(Spacer(1, 10 * mm))
+        # 4-column signature row including Director per latest brief
+        story.append(Table([
+            ["Prepared by", "Checked by", "Director", "Examination Controller"]
+        ], colWidths=[44 * mm] * 4,
+            style=TableStyle([
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 18),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.grey),
+            ])))
         if idx + 1 < len(records):
             story.append(PageBreak())
 
@@ -895,3 +939,104 @@ def program_short(program: str) -> str:
     if "Master" in program:
         return "M. TECH"
     return "PROG"
+
+
+# ---------------------------------------------------------------------------
+# Grade tables — reference tables embedded at the bottom of TC* / GS*
+# Source: GBPIET ordinances (M.Tech) and Academic Council minutes 2025
+# (B.Tech & MCA, Section 22.10).
+# ---------------------------------------------------------------------------
+
+_GRADE_TABLE_BTECH_MCA_2025 = [
+    ("Letter Grade", "Grade Point", "Marks Range"),
+    ("O", "10", "≥ 95%"),
+    ("A+", "9.5", "90% – < 95%"),
+    ("A", "9", "85% – < 90%"),
+    ("B+", "8.5", "80% – < 85%"),
+    ("B", "8", "75% – < 80%"),
+    ("C+", "7.5", "70% – < 75%"),
+    ("C", "7", "65% – < 70%"),
+    ("D+", "6.5", "60% – < 65%"),
+    ("D", "6", "55% – < 60%"),
+    ("E+", "5.5", "50% – < 55%"),
+    ("E", "5", "45% – < 50%"),
+    ("P", "4.5", "40% – < 45%"),
+    ("F", "0", "< 40%"),
+]
+
+_GRADE_TABLE_MTECH = [
+    ("Letter Grade", "Grade Point", "Marks Range"),
+    ("O — Outstanding", "10", "≥ 90%"),
+    ("A+ — Excellent", "9", "85% – < 90%"),
+    ("A — Very Good", "8", "80% – < 85%"),
+    ("B — Good", "7", "70% – < 80%"),
+    ("C — Average", "6", "60% – < 70%"),
+    ("P — Pass", "5", "50% – < 60%"),
+    ("F — Fail", "0", "< 50%"),
+    ("AB — Absent", "—", "Absent"),
+]
+
+
+def _grade_table_for_program(program: str) -> List[Tuple[str, str, str]]:
+    if program_short(program) == "M. TECH":
+        return _GRADE_TABLE_MTECH
+    return _GRADE_TABLE_BTECH_MCA_2025
+
+
+def _grade_reference_block(program: str) -> Table:
+    rows = _grade_table_for_program(program)
+    t = Table(rows, colWidths=[40 * mm, 25 * mm, 50 * mm], hAlign="LEFT")
+    t.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.grey),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return t
+
+
+def _sum_marks(records_subjects: List[dict], key: str) -> Tuple[int, int]:
+    """Sum 'a/b' style marks columns. Returns (sum_a, sum_b)."""
+    sa = sb = 0
+    for s in records_subjects:
+        v = (s.get(key) or "").strip()
+        m = re.match(r"^(-?\d+)\s*/\s*(\d+)$", v)
+        if m:
+            sa += int(m.group(1)) if m.group(1) != "-" else 0
+            sb += int(m.group(2))
+    return sa, sb
+
+
+def _compute_totals(subjects: List[dict]) -> dict:
+    tc = 0
+    tgp = 0.0
+    for s in subjects:
+        try:
+            c = int(s.get("credits") or 0)
+        except Exception:
+            c = 0
+        try:
+            gp = float(s.get("grade_points") or 0)
+        except Exception:
+            gp = 0.0
+        tc += c
+        tgp += c * gp
+    ext_a, ext_b = _sum_marks(subjects, "external")
+    ses_a, ses_b = _sum_marks(subjects, "sessional")
+    tot_a, tot_b = _sum_marks(subjects, "total")
+    return {
+        "credits": tc,
+        "grade_points": tgp,
+        "external": f"{ext_a}/{ext_b}" if ext_b else "",
+        "sessional": f"{ses_a}/{ses_b}" if ses_b else "",
+        "total": f"{tot_a}/{tot_b}" if tot_b else "",
+    }
+
