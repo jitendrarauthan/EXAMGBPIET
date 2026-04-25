@@ -618,6 +618,20 @@ _ASSETS = Path(__file__).parent / "assets"
 INSTITUTE_LOGO = _ASSETS / "institute_logo.png"
 UTU_LOGO = _ASSETS / "utu_logo.png"
 
+# Optional decorative font for the institute name on the GS. If the TTF is
+# present we register it with ReportLab so the font can be used directly via
+# its PostScript-style name; otherwise we silently fall back to Helvetica-Bold.
+_ALGERIAN_TTF = _ASSETS / "fonts" / "Algerian.ttf"
+_GS_TITLE_FONT = "Helvetica-Bold"
+try:
+    if _ALGERIAN_TTF.exists():
+        from reportlab.pdfbase import pdfmetrics as _pdfm
+        from reportlab.pdfbase.ttfonts import TTFont as _TTFont
+        _pdfm.registerFont(_TTFont("Algerian", str(_ALGERIAN_TTF)))
+        _GS_TITLE_FONT = "Algerian"
+except Exception:
+    _GS_TITLE_FONT = "Helvetica-Bold"
+
 
 from reportlab.platypus import Image as RLImage  # noqa: E402
 
@@ -1069,11 +1083,13 @@ def _draw_gs_header(canv, doc):
     text_w = page_w - 2 * margin - 2 * (logo_size + 4 * mm)
     name_text = _INSTITUTE_LINES[0]
     # Auto-shrink the institute name to the largest size that fits in one line
-    name_size = 13.5
-    while name_size > 9 and stringWidth(name_text, "Helvetica-Bold", name_size) > text_w:
+    # using the configured GS title font (Algerian if available, else
+    # Helvetica-Bold). Algerian glyphs are wider so we widen the search range.
+    name_size = 16.0
+    while name_size > 7 and stringWidth(name_text, _GS_TITLE_FONT, name_size) > text_w:
         name_size -= 0.25
 
-    canv.setFont("Helvetica-Bold", name_size)
+    canv.setFont(_GS_TITLE_FONT, name_size)
     canv.drawCentredString(cx, top_y - 5 * mm, name_text)
     canv.setFont("Helvetica-Bold", 10.5)
     canv.drawCentredString(cx, top_y - 10 * mm, _INSTITUTE_LINES[1])
@@ -1287,12 +1303,27 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         story.append(Spacer(1, 3 * mm))
 
         # ---- Subjects table ----
+        # GS-specific subject paragraph styles — sized to match the surrounding
+        # table cells (codes/grades render at 9 pt via the table FONTSIZE rule),
+        # so the wrapped subject names visually align with the rest of the row.
+        gs_subject_style = ParagraphStyle(
+            "gs_subject", parent=st["label"], fontName="Helvetica",
+            fontSize=9, alignment=0, leading=11,
+        )
+        gs_back_subject_style = ParagraphStyle(
+            "gs_back_subject", parent=st["label"], fontName="Helvetica-Bold",
+            fontSize=9, alignment=0, leading=11,
+            textColor=colors.HexColor("#92400e"),
+        )
         rows = [["Subject Code", "Subject Name", "Credits", "Grade", "Grade Points"]]
         total_credits = 0
         total_gp = 0.0
         for s in rec.get("subjects", []):
             cleared_back = s.get("back") and not s.get("back_pending")
-            name_para = Paragraph(s["name"], st["back_subject"] if cleared_back else st["subject"])
+            name_para = Paragraph(
+                s["name"],
+                gs_back_subject_style if cleared_back else gs_subject_style,
+            )
             rows.append([s["code"], name_para, s.get("credits", ""),
                          s.get("grade", ""), s.get("grade_points", "")])
             try:
