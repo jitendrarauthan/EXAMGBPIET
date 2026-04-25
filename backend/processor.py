@@ -903,7 +903,10 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             "Sessional\nMarks", "Total\nMarks", "Grade", "Grade\nPoints",
         ]]
         for s in rec.get("subjects", []):
-            name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
+            # Only highlight subjects that were highlighted in SEM_ sheet AND
+            # the student actually cleared the back paper (grade not F/Ab/Dt).
+            cleared_back = s.get("back") and not s.get("back_pending")
+            name_para = Paragraph(s["name"], st["back_subject"] if cleared_back else st["subject"])
             rows.append([
                 s["code"], name_para, s.get("credits", ""), s.get("external", ""),
                 s.get("sessional", ""), s.get("total", ""), s.get("grade", ""),
@@ -1134,7 +1137,8 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         total_credits = 0
         total_gp = 0.0
         for s in rec.get("subjects", []):
-            name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
+            cleared_back = s.get("back") and not s.get("back_pending")
+            name_para = Paragraph(s["name"], st["back_subject"] if cleared_back else st["subject"])
             rows.append([s["code"], name_para, s.get("credits", ""),
                          s.get("grade", ""), s.get("grade_points", "")])
             try:
