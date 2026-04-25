@@ -80,3 +80,47 @@ body {
     border-radius: 3px;
     font-weight: 600;
 }
+
+
+/* ----------------------------- Print styles ----------------------------- */
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 14mm 14mm 14mm 14mm;
+    }
+    html, body {
+        background: #ffffff !important;
+    }
+    /* Remove drop shadows and animations that don't render well on paper. */
+    .fade-up { animation: none !important; }
+    .shadow-sm, .shadow-md, .shadow-lg, .shadow {
+        box-shadow: none !important;
+    }
+    /* Each semester card starts on its own page so the mini-profile sits at
+       the very top of every printed sheet. */
+    .semester-card {
+        break-before: page;
+        page-break-before: always;
+        break-inside: avoid-page;
+        border: 1px solid #d6d3d1 !important;
+        padding: 6mm !important;
+    }
+    /* The first semester card already follows the overview/profile, so don't
+       force an empty page before it. */
+    .semester-card:first-of-type {
+        break-before: auto;
+        page-break-before: auto;
+    }
+    /* Compact subject table in print so 10–12 subjects fit on one A4 page. */
+    .semester-card table { font-size: 10px; }
+    .semester-card table th, .semester-card table td { padding: 2px 5px !important; line-height: 1.3 !important; }
+    .semester-card h3 { font-size: 18px !important; line-height: 1.1 !important; }
+    .semester-card .print-profile { margin-bottom: 4mm !important; padding-bottom: 2mm !important; }
+    .semester-card .print-profile p[class*="text-xl"] { font-size: 16px !important; }
+    .semester-card > div:first-of-type + div { margin-top: 2mm !important; }
+    /* Avoid breaking subject rows across pages where possible. */
+    table { page-break-inside: auto; }
+    tr    { page-break-inside: avoid; page-break-after: auto; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+}
