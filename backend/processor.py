@@ -1068,22 +1068,26 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             except Exception:
                 pass
 
-        # ---- Institute / UTU strip — institute and university each on its own line ----
-        single_line_styles = [
+        # ---- Institute strip — exactly 4 lines, institute name largest ----
+        gs_header_styles = [
             (
-                "<font size='11.5' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
+                "<font size='14' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
                 st["sub"],
             ),
             (
-                "<font size='8.5'>Pauri Garhwal, Uttarakhand &middot; An Autonomous Institute of the Government of Uttarakhand</font>",
+                "<font size='10.5' face='Helvetica-Bold'>Pauri Garhwal, Uttarakhand</font>",
+                st["sub"],
+            ),
+            (
+                "<font size='9'>(An Autonomous Institute of the Government of Uttarakhand)</font>",
                 st["small"],
             ),
             (
-                "<font size='9.5' face='Helvetica-Bold'>Affiliated to Veer Madho Singh Bhandari Uttarakhand Technical University</font>",
-                st["sub"],
+                "<font size='9'>(Affiliated to Veer Madho Singh Bhandari Uttarakhand Technical University)</font>",
+                st["small"],
             ),
         ]
-        story.append(_logo_header(single_line_styles, total_width_mm=page_width_mm, logo_size_mm=22))
+        story.append(_logo_header(gs_header_styles, total_width_mm=page_width_mm, logo_size_mm=24))
         story.append(Spacer(1, 2 * mm))
 
         # ---- Title band — programme / branch / semester+session each on its own line ----
@@ -1114,7 +1118,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
              Paragraph(f"<font size='10.5' face='Helvetica-Bold'>{rec.get('roll_no','')}</font>",
                        st["label"])],
             [Paragraph("<font size='7.5' color='#57534e'><b>FATHER'S NAME</b></font>", st["small"]),
-             Paragraph(f"<font size='10'>{rec.get('father_name','')}</font>", st["label"]),
+             Paragraph(f"<font size='10'><b>{rec.get('father_name','')}</b></font>", st["label"]),
              Paragraph("<font size='7.5' color='#57534e'><b>UNIVERSITY ENROLLMENT NO.</b></font>", st["small"]),
              Paragraph(f"<font size='10' face='Helvetica-Bold'>{rec.get('enroll_no','')}</font>", st["label"])],
         ], colWidths=[34 * mm, 60 * mm, 40 * mm, 40 * mm])
@@ -1179,7 +1183,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         story.append(t)
         story.append(Spacer(1, 3 * mm))
 
-        # ---- Semester-wise Result — current + previous semesters only ----
+        # ---- Semester-wise Result — full I…VIII grid, future semesters blank ----
         roll = rec.get("roll_no", "")
         per_sem = (all_sem_summary or {}).get(roll, {})
         sem_order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
@@ -1187,13 +1191,19 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             current_idx = sem_order.index(semester_roman)
         except ValueError:
             current_idx = len(sem_order) - 1
-        visible_sems = sem_order[:current_idx + 1]
-        hist_header = ["Semester"] + visible_sems
+        hist_header = ["Semester"] + sem_order
         sgpa_row = ["SGPA"]
         cgpa_row = ["CGPA"]
         ec_row = ["Earned Cr."]
         res_row = ["Result"]
-        for s in visible_sems:
+        for i, s in enumerate(sem_order):
+            if i > current_idx:
+                # Future semester — leave blank/dash on the GS
+                sgpa_row.append("—")
+                cgpa_row.append("—")
+                ec_row.append("—")
+                res_row.append("—")
+                continue
             cell = per_sem.get(s, {})
             if not cell and s == semester_roman:
                 cell = {
@@ -1206,11 +1216,21 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             cgpa_row.append(cell.get("cgpa") or "—")
             ec_row.append(cell.get("earned_credits") or "—")
             res_row.append((cell.get("result") or "—")[:6])
-        n_cols = len(visible_sems)
+        n_cols = len(sem_order)
         col_w = (page_width_mm - 24) / max(n_cols, 1)
         history = Table([hist_header, sgpa_row, cgpa_row, ec_row, res_row],
                           colWidths=[24 * mm] + [col_w * mm] * n_cols,
                           repeatRows=1)
+        # Style: shade future-semester columns lighter so the eye knows they
+        # belong to a later GS.
+        future_col_style = []
+        for i in range(current_idx + 2, len(sem_order) + 1):
+            future_col_style.append(
+                ("BACKGROUND", (i, 1), (i, -1), colors.HexColor("#fafaf9"))
+            )
+            future_col_style.append(
+                ("TEXTCOLOR", (i, 1), (i, -1), colors.HexColor("#a8a29e"))
+            )
         history.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
             ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
@@ -1224,7 +1244,18 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("TOPPADDING", (0, 0), (-1, -1), 3),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            *future_col_style,
         ]))
+        # Legend immediately above the semester-wise result table.
+        story.append(Paragraph(
+            "<font size='8' color='#57534e'>"
+            "<b>*</b> &mdash; subject cleared after back paper "
+            "&nbsp;&nbsp;&nbsp;&nbsp;"
+            "<b>$</b> &mdash; non-credit subject"
+            "</font>",
+            st["label"],
+        ))
+        story.append(Spacer(1, 1.5 * mm))
         story.append(Paragraph(
             "<font size='8.5' color='#57534e'><b>SEMESTER-WISE RESULT</b></font>",
             st["label"],

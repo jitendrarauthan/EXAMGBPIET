@@ -91,6 +91,18 @@ body {
     html, body {
         background: #ffffff !important;
     }
+    /* Hide the Emergent platform "Made with Emergent" badge from print output. */
+    #emergent-badge,
+    [id^="emergent-badge"],
+    a[href*="emergent.app"],
+    a[href*="emergent.sh"],
+    a[href*="emergent"],
+    [class*="emergent-badge"],
+    [data-emergent],
+    iframe[src*="emergent"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
     /* Remove drop shadows and animations that don't render well on paper. */
     .fade-up { animation: none !important; }
     .shadow-sm, .shadow-md, .shadow-lg, .shadow {
