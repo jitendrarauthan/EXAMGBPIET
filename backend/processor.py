@@ -691,15 +691,15 @@ def _styles():
                                    fontSize=11, alignment=1, spaceBefore=4, spaceAfter=4,
                                    leading=13),
         "label": ParagraphStyle("label", parent=s["Normal"], fontName="Helvetica",
-                                 fontSize=7.5, alignment=0, leading=9),
+                                 fontSize=9, alignment=0, leading=11),
         "right": ParagraphStyle("right", parent=s["Normal"], fontName="Helvetica",
                                  fontSize=9, alignment=2),
         "back_subject": ParagraphStyle("back_subject", parent=s["Normal"],
-                                        fontName="Helvetica-Bold", fontSize=7,
+                                        fontName="Helvetica-Bold", fontSize=8,
                                         textColor=colors.HexColor("#92400e"), alignment=0,
-                                        leading=8.4),
+                                        leading=10),
         "subject": ParagraphStyle("subject", parent=s["Normal"], fontName="Helvetica",
-                                    fontSize=7, alignment=0, leading=8.4),
+                                    fontSize=8, alignment=0, leading=10),
     }
 
 
@@ -747,38 +747,31 @@ def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str
 
     # Course / branch / semester block — sits just below logos, full width.
     course_y = top_y - logo_size - 5 * mm
-    canv.setFont("Helvetica-Bold", 12.5)
+    canv.setFont("Helvetica-Bold", 13)
     canv.drawCentredString(
-        cx, course_y, f"Tabulation Chart for {program_short(program) or program}"
+        cx, course_y, f"Tabulation Chart for {program or program_short(program)}"
     )
-    canv.setFont("Helvetica-Bold", 10.5)
-    canv.drawCentredString(cx, course_y - 4.8 * mm, branch or "")
-    canv.setFont("Helvetica", 10)
+    canv.setFont("Helvetica-Bold", 11)
+    canv.drawCentredString(cx, course_y - 5 * mm, branch or "")
+    canv.setFont("Helvetica", 10.5)
     sess_line = f"{sem} Semester"
     if session:
         sess_line += f"   |   {session}"
-    canv.drawCentredString(cx, course_y - 9.2 * mm, sess_line)
+    canv.drawCentredString(cx, course_y - 9.6 * mm, sess_line)
 
     # Thin divider beneath header
     canv.setLineWidth(0.4)
     canv.setStrokeColor(colors.HexColor("#9ca3af"))
-    canv.line(margin, course_y - 12 * mm, page_w - margin, course_y - 12 * mm)
+    canv.line(margin, course_y - 12.5 * mm, page_w - margin, course_y - 12.5 * mm)
     canv.restoreState()
 
 
 def _draw_tc_footer(canv, doc, program: str, branch: str, sem: str, session: str):
-    """Per-page footer for TC: legend line + 5-cell signature row + page metadata."""
+    """Per-page footer for TC: 5-cell signature row + page number.
+    (Legend is rendered in-flow, immediately after the last student record.)"""
     canv.saveState()
-    page_w, page_h = doc.pagesize
+    page_w, _ = doc.pagesize
     margin = 12 * mm
-    # ---- Legend (just above signature line) ----
-    legend_y = 22 * mm
-    canv.setFont("Helvetica-Oblique", 7.5)
-    canv.setFillColor(colors.HexColor("#57534e"))
-    canv.drawString(
-        margin, legend_y,
-        "*  subject cleared after back paper          $  non-credit subject",
-    )
     # ---- Signature row ----
     y = 14 * mm
     cell_w = (page_w - 2 * margin) / 5.0
@@ -790,15 +783,14 @@ def _draw_tc_footer(canv, doc, program: str, branch: str, sem: str, session: str
     canv.setLineWidth(0.4)
     canv.setStrokeColor(colors.HexColor("#9ca3af"))
     canv.line(margin, y + 2, page_w - margin, y + 2)
-    canv.setFont("Helvetica", 8.5)
+    canv.setFont("Helvetica", 9)
     canv.setFillColor(colors.HexColor("#1c1917"))
     for i, lbl in enumerate(labels):
         x = margin + i * cell_w + cell_w / 2
         canv.drawCentredString(x, y - 6, lbl)
     canv.setFont("Helvetica", 7)
     canv.setFillColor(colors.HexColor("#57534e"))
-    canv.drawRightString(page_w - margin, 6 * mm,
-                          f"Page {doc.page}")
+    canv.drawRightString(page_w - margin, 6 * mm, f"Page {doc.page}")
     canv.restoreState()
 
 
@@ -868,12 +860,12 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 1),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ]))
         rows = [[
-            "Subject Code", "Subject Name", "Credits", "Ext.",
-            "Ses.", "Total", "Grade", "GP",
+            "Subject\nCode", "Subject Name", "Credits", "External\nMarks",
+            "Sessional\nMarks", "Total\nMarks", "Grade", "Grade\nPoints",
         ]]
         for s in rec.get("subjects", []):
             name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
@@ -910,15 +902,15 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 7),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("ALIGN", (2, 1), (-1, -4), "CENTER"),
-            ("FONTSIZE", (0, 1), (-1, -1), 7),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 3),
             ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 0.8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ("SPAN", (0, -3), (1, -3)),
             ("BACKGROUND", (0, -3), (-1, -3), colors.HexColor("#f5f5f4")),
             ("FONTNAME", (0, -3), (-1, -3), "Helvetica-Bold"),
@@ -934,11 +926,32 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
             ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#fafaf9")),
         ]))
-        return KeepTogether([t_info, t, Spacer(1, 1.5 * mm)])
+        return KeepTogether([t_info, t, Spacer(1, 2.5 * mm)])
 
-    for idx, rec in enumerate(records):
-        story.append(build_student_block(rec))
-    # Frame fills students naturally (3-4 per page) via KeepTogether.
+    # Legend flowable to drop in after each chunk of 3 students.
+    legend_style = ParagraphStyle(
+        "tc_legend", fontName="Helvetica-Oblique", fontSize=8.5, leading=11,
+        textColor=colors.HexColor("#57534e"), alignment=0,
+    )
+    def legend_flowable():
+        return Paragraph(
+            "<b>*</b>&nbsp;&nbsp;subject cleared after back paper "
+            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "<b>$</b>&nbsp;&nbsp;non-credit subject",
+            legend_style,
+        )
+
+    students_per_page = 3
+    total = len(records)
+    for i in range(0, total, students_per_page):
+        chunk = records[i:i + students_per_page]
+        for rec in chunk:
+            story.append(build_student_block(rec))
+        # Legend right after the last student of this page
+        story.append(Spacer(1, 1.5 * mm))
+        story.append(legend_flowable())
+        if i + students_per_page < total:
+            story.append(PageBreak())
 
     doc.build(story)
     return buf.getvalue()
