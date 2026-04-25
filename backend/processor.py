@@ -706,12 +706,13 @@ def _styles():
 def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str):
     """Per-page header for TC: institute logos + name strip + course/branch/semester.
 
-    Drawn directly on the canvas so it appears on every A3 page.
+    Drawn directly on the canvas so it appears on every A3 page. Sized for A3
+    (297×420 mm) — logos 30 mm, institute name 15 pt bold.
     """
     canv.saveState()
     page_w, _page_h = doc.pagesize
     margin = 12 * mm
-    logo_size = 22 * mm
+    logo_size = 30 * mm
     top_y = _page_h - 6 * mm  # top edge of logo
 
     # Logos (left = institute, right = UTU) — silently skip if files missing.
@@ -737,32 +738,32 @@ def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str
     # Centered institute text block (4 lines beside logos)
     cx = page_w / 2
     canv.setFillColor(colors.black)
-    canv.setFont("Helvetica-Bold", 12)
-    canv.drawCentredString(cx, top_y - 4.5 * mm, _INSTITUTE_LINES[0])
-    canv.setFont("Helvetica", 9.5)
-    canv.drawCentredString(cx, top_y - 9 * mm, _INSTITUTE_LINES[1])
-    canv.setFont("Helvetica", 8.5)
-    canv.drawCentredString(cx, top_y - 13 * mm, _INSTITUTE_LINES[2])
-    canv.drawCentredString(cx, top_y - 16.5 * mm, _INSTITUTE_LINES[3])
+    canv.setFont("Helvetica-Bold", 15)
+    canv.drawCentredString(cx, top_y - 6 * mm, _INSTITUTE_LINES[0])
+    canv.setFont("Helvetica", 11.5)
+    canv.drawCentredString(cx, top_y - 11.5 * mm, _INSTITUTE_LINES[1])
+    canv.setFont("Helvetica", 10)
+    canv.drawCentredString(cx, top_y - 16.5 * mm, _INSTITUTE_LINES[2])
+    canv.drawCentredString(cx, top_y - 21 * mm, _INSTITUTE_LINES[3])
 
     # Course / branch / semester block — sits just below logos, full width.
     course_y = top_y - logo_size - 5 * mm
-    canv.setFont("Helvetica-Bold", 13)
+    canv.setFont("Helvetica-Bold", 14)
     canv.drawCentredString(
         cx, course_y, f"Tabulation Chart for {program or program_short(program)}"
     )
-    canv.setFont("Helvetica-Bold", 11)
-    canv.drawCentredString(cx, course_y - 5 * mm, branch or "")
-    canv.setFont("Helvetica", 10.5)
+    canv.setFont("Helvetica-Bold", 12)
+    canv.drawCentredString(cx, course_y - 5.5 * mm, branch or "")
+    canv.setFont("Helvetica", 11)
     sess_line = f"{sem} Semester"
     if session:
         sess_line += f"   |   {session}"
-    canv.drawCentredString(cx, course_y - 9.6 * mm, sess_line)
+    canv.drawCentredString(cx, course_y - 10.5 * mm, sess_line)
 
     # Thin divider beneath header
-    canv.setLineWidth(0.4)
+    canv.setLineWidth(0.5)
     canv.setStrokeColor(colors.HexColor("#9ca3af"))
-    canv.line(margin, course_y - 12.5 * mm, page_w - margin, course_y - 12.5 * mm)
+    canv.line(margin, course_y - 13.5 * mm, page_w - margin, course_y - 13.5 * mm)
     canv.restoreState()
 
 
@@ -816,14 +817,47 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
         exam_session = meta.get("exam_session", "") or exam_session
 
     from reportlab.platypus import (
-        BaseDocTemplate, Frame, PageTemplate, KeepTogether,
+        BaseDocTemplate, Frame, PageTemplate, KeepTogether, Flowable,
     )
 
     buf = io.BytesIO()
     page = A3
     margin = 12 * mm
-    footer_h = 28 * mm  # legend + signature band
-    header_h = 50 * mm  # institute strip + course/branch/semester (drawn on canvas)
+    footer_h = 28 * mm  # signature band
+    header_h = 60 * mm  # institute strip + course/branch/semester (drawn on canvas)
+
+    # ---- Per-page legend, drawn dynamically just below the last student block ----
+    last_block_bottom: dict[int, float] = {}
+
+    class _RecordY(Flowable):
+        """Zero-height marker; records the absolute y position where it draws.
+
+        We append one of these after every student block; the LAST one drawn on a
+        given page reveals where the bottom of that page's content sits, so the
+        legend can be placed immediately beneath it (rather than floating in
+        whitespace at the bottom of the page).
+        """
+        def wrap(self, _w, _h):
+            return (1, 0)
+
+        def draw(self):
+            _x, y = self.canv.absolutePosition(0, 0)
+            last_block_bottom[self.canv.getPageNumber()] = y
+
+    def _on_page_end(c, _d):
+        page_num = c.getPageNumber()
+        y = last_block_bottom.get(page_num)
+        if y is None:
+            return
+        c.saveState()
+        c.setFont("Helvetica-Oblique", 9)
+        c.setFillColor(colors.HexColor("#57534e"))
+        c.drawString(
+            margin, y - 4.5 * mm,
+            "*  subject cleared after back paper          $  non-credit subject",
+        )
+        c.restoreState()
+
     doc = BaseDocTemplate(
         buf, pagesize=page,
         leftMargin=margin, rightMargin=margin,
@@ -837,6 +871,7 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
     doc.addPageTemplates([PageTemplate(
         id="tc", frames=[frame],
         onPage=lambda c, d: _draw_tc_page(c, d, program, branch, semester_roman, exam_session),
+        onPageEnd=_on_page_end,
     )])
 
     st = _styles()
@@ -928,30 +963,12 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
         ]))
         return KeepTogether([t_info, t, Spacer(1, 2.5 * mm)])
 
-    # Legend flowable to drop in after each chunk of 3 students.
-    legend_style = ParagraphStyle(
-        "tc_legend", fontName="Helvetica-Oblique", fontSize=8.5, leading=11,
-        textColor=colors.HexColor("#57534e"), alignment=0,
-    )
-    def legend_flowable():
-        return Paragraph(
-            "<b>*</b>&nbsp;&nbsp;subject cleared after back paper "
-            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-            "<b>$</b>&nbsp;&nbsp;non-credit subject",
-            legend_style,
-        )
-
-    students_per_page = 3
-    total = len(records)
-    for i in range(0, total, students_per_page):
-        chunk = records[i:i + students_per_page]
-        for rec in chunk:
-            story.append(build_student_block(rec))
-        # Legend right after the last student of this page
-        story.append(Spacer(1, 1.5 * mm))
-        story.append(legend_flowable())
-        if i + students_per_page < total:
-            story.append(PageBreak())
+    # Auto-fit: ReportLab places as many KeepTogether blocks per page as fit.
+    # After every block we drop a zero-height _RecordY marker so the
+    # onPageEnd hook can draw the legend just below the page's last block.
+    for rec in records:
+        story.append(build_student_block(rec))
+        story.append(_RecordY())
 
     doc.build(story)
     return buf.getvalue()
