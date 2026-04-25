@@ -45,6 +45,19 @@ export default function StudentResults() {
   // actually cleared it (i.e. did not get F / Ab / Dt).
   const isCleared = (s) => s.back && !s.back_pending;
 
+  // Pre-compute running cumulative earned credits keyed by semester roman.
+  // Iterate in ascending semester order (I → VIII) regardless of display order.
+  const ASC_SEMS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+  const cumBySem = {};
+  let _runningEC = 0;
+  ASC_SEMS.forEach((s) => {
+    const r = ordered.find((x) => x.semester === s);
+    if (r) {
+      _runningEC += parseInt(r.earned_credits, 10) || 0;
+      cumBySem[s] = _runningEC;
+    }
+  });
+
   return (
     <div className="min-h-screen bg-stone-100">
       <header className="bg-white border-b border-stone-200 print:hidden">
@@ -195,7 +208,7 @@ export default function StudentResults() {
                             {r.earned_credits || "—"}
                           </td>
                           <td className="p-2 text-right">
-                            {r.cuml_earned_credits || r.earned_credits || "—"}
+                            {cumBySem[r.semester] || "—"}
                           </td>
                           <td className="p-2">
                             <span
