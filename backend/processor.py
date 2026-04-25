@@ -162,6 +162,7 @@ def parse_tc_excel_sheet(ws) -> List[dict]:
                     rec["sgpa"] = _norm(ws.cell(rr, 8).value)
                     rec["cgpa"] = _norm(ws.cell(rr, 10).value)
                     rec["earned_credits"] = _norm(ws.cell(rr, 12).value)
+                    rec["cuml_earned_credits"] = _norm(ws.cell(rr, 14).value)
                 continue
             if re.match(r"^[A-Z]{2,4}\s?\d{2,4}$", code):
                 rec["subjects"].append({
@@ -738,29 +739,51 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
             Paragraph(f"<b>CGPA:</b> {rec.get('cgpa','')}", st["label"]),
             "",
         ])
+        # ---- Earned Credits row ----
+        rows.append([
+            Paragraph(
+                f"<b>Earned Credits:</b> {rec.get('earned_credits','')}",
+                st["label"],
+            ),
+            "",
+            "",
+            "",
+            Paragraph(
+                f"<b>Cumulative Earned Credits:</b> {rec.get('cuml_earned_credits') or rec.get('earned_credits','')}",
+                st["label"],
+            ),
+            "",
+            "",
+            "",
+        ])
         t = Table(rows, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
-            ("GRID", (0, 0), (-1, -3), 0.25, colors.grey),
+            ("GRID", (0, 0), (-1, -4), 0.25, colors.grey),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 8),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("ALIGN", (2, 1), (-1, -3), "CENTER"),
+            ("ALIGN", (2, 1), (-1, -4), "CENTER"),
             ("FONTSIZE", (0, 1), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            # Totals row spans the first 2 cols (label) and reuses individual cells for sums
-            ("SPAN", (0, -2), (1, -2)),
-            ("BACKGROUND", (0, -2), (-1, -2), colors.HexColor("#f5f5f4")),
-            ("FONTNAME", (0, -2), (-1, -2), "Helvetica-Bold"),
-            ("ALIGN", (2, -2), (-1, -2), "CENTER"),
+            # Totals row
+            ("SPAN", (0, -3), (1, -3)),
+            ("BACKGROUND", (0, -3), (-1, -3), colors.HexColor("#f5f5f4")),
+            ("FONTNAME", (0, -3), (-1, -3), "Helvetica-Bold"),
+            ("ALIGN", (2, -3), (-1, -3), "CENTER"),
             # Result row span
-            ("SPAN", (0, -1), (1, -1)),
-            ("SPAN", (2, -1), (3, -1)),
-            ("SPAN", (4, -1), (5, -1)),
-            ("SPAN", (6, -1), (7, -1)),
+            ("SPAN", (0, -2), (1, -2)),
+            ("SPAN", (2, -2), (3, -2)),
+            ("SPAN", (4, -2), (5, -2)),
+            ("SPAN", (6, -2), (7, -2)),
+            ("FONTNAME", (0, -2), (-1, -2), "Helvetica-Bold"),
+            # Earned credits row span
+            ("SPAN", (0, -1), (3, -1)),
+            ("SPAN", (4, -1), (7, -1)),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#fafaf9")),
         ]))
         story.append(t)
         story.append(Spacer(1, 5 * mm))
@@ -775,14 +798,15 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
     story.append(Spacer(1, 2 * mm))
     story.append(_grade_reference_block(program))
     story.append(Spacer(1, 8 * mm))
-    # Signature row — Director added per latest brief
+    # Signature row — per latest brief
     story.append(Table([[
-        "Prepared by", "Checked by (Tabulators)",
-        "Controller (GBPIET)", "Director (GBPIET)", "Controller (UTU)",
+        "Prepared by", "Checked by",
+        "Examination Controller", "Director", "Examination Controller (VMSB UTU)",
     ]], colWidths=[55 * mm] * 5,
         style=TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
                           ("FONTSIZE", (0, 0), (-1, -1), 9),
-                          ("TOPPADDING", (0, 0), (-1, -1), 14)])))
+                          ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.grey),
+                          ("TOPPADDING", (0, 0), (-1, -1), 18)])))
 
     doc.build(story)
     return buf.getvalue()
@@ -797,18 +821,18 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
                      exam_session: str = "December 2025", batch: str = "") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
-                             topMargin=14 * mm, bottomMargin=14 * mm)
+                             topMargin=12 * mm, bottomMargin=12 * mm)
     st = _styles()
     story = []
-    short = _branch_short(branch)
-    page_width_mm = A4[0] / mm - 36  # margins
+    page_width_mm = A4[0] / mm - 36
+    from reportlab.platypus import KeepTogether
+
     for idx, rec in enumerate(records):
-        # Top-right: barcode (replaces SL. NO. text per latest brief)
+        # ---- Top-right barcode (replaces SL.NO.) ----
         bc_top = _make_barcode_png(rec.get("roll_no", ""))
         if bc_top is not None:
             try:
-                top_bc = RLImage(bc_top, width=42 * mm, height=11 * mm)
-                top_bc.hAlign = "RIGHT"
+                top_bc = RLImage(bc_top, width=44 * mm, height=11 * mm)
                 top_table = Table(
                     [["", top_bc]],
                     colWidths=[(page_width_mm - 50) * mm, 50 * mm],
@@ -824,92 +848,151 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
                 story.append(top_table)
             except Exception:
                 pass
+
+        # ---- Institute / UTU header ----
         story.append(_logo_header([
             (_INSTITUTE_LINES[0], st["title"]),
             (_INSTITUTE_LINES[1], st["sub"]),
             (_INSTITUTE_LINES[2], st["small"]),
             (_INSTITUTE_LINES[3], st["small"]),
         ], total_width_mm=page_width_mm, logo_size_mm=24))
-        story.append(Spacer(1, 3 * mm))
-        story.append(Paragraph("<b>GRADE SHEET</b>", st["section"]))
-        story.append(Paragraph(program, st["sub"]))
-        story.append(Paragraph(branch, st["sub"]))
-        story.append(Paragraph(f"{semester_roman} Semester {exam_session}", st["sub"]))
+        story.append(Spacer(1, 2 * mm))
+
+        # ---- Title band ----
+        title_band = Table([[Paragraph(
+            "<para alignment='center'><font size='14' color='white'><b>GRADE SHEET</b></font><br/>"
+            f"<font size='9' color='white'>{program} &middot; {branch}</font><br/>"
+            f"<font size='9' color='white'>{semester_roman} Semester &nbsp;|&nbsp; {exam_session}</font></para>",
+            st["sub"],
+        )]], colWidths=[page_width_mm * mm])
+        title_band.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1e1b4b")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(title_band)
         story.append(Spacer(1, 4 * mm))
 
-        info = [
-            [Paragraph(f"<b>Name:</b> {rec.get('name','')}", st["label"]),
-             Paragraph(f"<b>University Roll No.:</b> {rec.get('roll_no','')}", st["label"])],
-            [Paragraph(f"<b>Father's Name:</b> {rec.get('father_name','')}", st["label"]),
-             Paragraph(f"<b>University Enrollment No.:</b> {rec.get('enroll_no','')}", st["label"])],
-        ]
-        t_info = Table(info, colWidths=[90 * mm, 84 * mm])
-        t_info.setStyle(TableStyle([
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.grey),
-            ("LEFTPADDING", (0, 0), (-1, -1), 5),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        # ---- Student details card (cleaner 2-row 4-col) ----
+        info = Table([
+            [Paragraph("<b>Name</b>", st["small"]),
+             Paragraph(f"<font size='10'>{rec.get('name','')}</font>", st["label"]),
+             Paragraph("<b>University Roll No.</b>", st["small"]),
+             Paragraph(f"<font size='10' face='Helvetica-Bold'>{rec.get('roll_no','')}</font>",
+                       st["label"])],
+            [Paragraph("<b>Father's Name</b>", st["small"]),
+             Paragraph(f"<font size='10'>{rec.get('father_name','')}</font>", st["label"]),
+             Paragraph("<b>University Enrollment No.</b>", st["small"]),
+             Paragraph(f"<font size='10'>{rec.get('enroll_no','')}</font>", st["label"])],
+        ], colWidths=[34 * mm, 60 * mm, 40 * mm, 40 * mm])
+        info.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f5f5f4")),
+            ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f5f5f4")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
-        story.append(t_info)
-        story.append(Spacer(1, 3 * mm))
+        story.append(info)
+        story.append(Spacer(1, 4 * mm))
 
+        # ---- Subjects table ----
         rows = [["Subject Code", "Subject Name", "Credits", "Grade", "Grade Points"]]
         total_credits = 0
         total_gp = 0.0
         for s in rec.get("subjects", []):
             name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
-            rows.append([s["code"], name_para, s["credits"], s["grade"], s.get("grade_points", "")])
+            rows.append([s["code"], name_para, s.get("credits", ""),
+                         s.get("grade", ""), s.get("grade_points", "")])
             try:
-                total_credits += int(s["credits"])
+                total_credits += int(s.get("credits") or 0)
             except Exception:
                 pass
             try:
-                total_gp += float(s["grade_points"]) * int(s["credits"])
+                total_gp += float(s.get("grade_points") or 0) * int(s.get("credits") or 0)
             except Exception:
                 pass
-        rows.append(["Total Credits / Total Grade Points", "", str(total_credits), "-", f"{total_gp:.0f}"])
-        rows.append([f"Earned Credits: {rec.get('earned_credits','')}", "",
-                      f"SGPA: {rec.get('sgpa','')}", f"CGPA: {rec.get('cgpa','')}", ""])
-        rows.append([f"Result: {rec.get('result','')}", "",
-                      f"Remark: {rec.get('remark','')}", "", ""])
-        col_widths = [25 * mm, 80 * mm, 20 * mm, 20 * mm, 29 * mm]
+        rows.append([
+            Paragraph("<b>Total Credits / Total Grade Points</b>", st["label"]),
+            "", str(total_credits), "—", f"{total_gp:.1f}",
+        ])
+        col_widths = [27 * mm, 78 * mm, 22 * mm, 22 * mm, 25 * mm]
         t = Table(rows, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
-            ("GRID", (0, 0), (-1, -4), 0.25, colors.grey),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("FONTSIZE", (0, 0), (-1, 0), 9),
             ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("ALIGN", (2, 1), (-1, -4), "CENTER"),
+            ("ALIGN", (2, 1), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("SPAN", (0, -3), (1, -3)),
-            ("BACKGROUND", (0, -3), (-1, -3), colors.HexColor("#f5f5f4")),
-            ("SPAN", (0, -2), (1, -2)),
-            ("SPAN", (3, -2), (4, -2)),
-            ("FONTNAME", (0, -2), (-1, -2), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2),
+              [colors.white, colors.HexColor("#fafaf9")]),
             ("SPAN", (0, -1), (1, -1)),
-            ("SPAN", (2, -1), (4, -1)),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#fef3c7")),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(t)
+        story.append(Spacer(1, 4 * mm))
 
-        story.append(Spacer(1, 8 * mm))
-        # 4-column signature row including Director per latest brief.
-        # Wrapped in KeepTogether to ensure ReportLab does not push it onto
-        # the next page when the student's subject list is long.
-        from reportlab.platypus import KeepTogether  # local import to avoid top-level churn
+        # ---- Summary card (SGPA / CGPA / Earned credits / Result / Remark) ----
+        sgpa = rec.get("sgpa") or "—"
+        cgpa = rec.get("cgpa") or "—"
+        earned = rec.get("earned_credits") or str(total_credits)
+        result_val = rec.get("result") or "—"
+        remark_val = rec.get("remark") or "—"
+        summary_top = Table([[
+            Paragraph(f"<font size='8' color='#57534e'>SGPA</font><br/>"
+                      f"<font size='14'><b>{sgpa}</b></font>", st["label"]),
+            Paragraph(f"<font size='8' color='#57534e'>CGPA</font><br/>"
+                      f"<font size='14'><b>{cgpa}</b></font>", st["label"]),
+            Paragraph(f"<font size='8' color='#57534e'>Earned Credits</font><br/>"
+                      f"<font size='14'><b>{earned}</b></font>", st["label"]),
+            Paragraph(f"<font size='8' color='#57534e'>Result</font><br/>"
+                      f"<font size='14'><b>{result_val}</b></font>", st["label"]),
+        ]], colWidths=[(page_width_mm / 4) * mm] * 4)
+        summary_top.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f5f5f4")),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(summary_top)
+        if remark_val and remark_val != "—":
+            story.append(Spacer(1, 2 * mm))
+            story.append(Paragraph(
+                f"<font size='8' color='#57534e'><b>Remark:</b></font> "
+                f"<font size='9'>{remark_val}</font>",
+                st["label"],
+            ))
+
+        story.append(Spacer(1, 10 * mm))
+
+        # ---- Signature row (Director + 3 others) ----
         sig = Table([
             ["Prepared by", "Checked by", "Director", "Examination Controller"]
-        ], colWidths=[44 * mm] * 4,
+        ], colWidths=[(page_width_mm / 4) * mm] * 4,
             style=TableStyle([
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("TOPPADDING", (0, 0), (-1, -1), 18),
-                ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.grey),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#44403c")),
+                ("TOPPADDING", (0, 0), (-1, -1), 16),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.HexColor("#9ca3af")),
             ]))
         story.append(KeepTogether([sig]))
         if idx + 1 < len(records):

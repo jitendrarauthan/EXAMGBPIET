@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 6 testing complete. Backend: 33/33 prior regression tests + 7/7 new iteration-6 tests PASS (40/40 = 100%). Frontend: 'Semester-wise overview' card renders correctly with all data-testids and is positioned BEFORE per-semester detail cards, but ROW ORDER IS WRONG — table shows Sem I → Sem VII (oldest first) when spec requires latest semester FIRST (Sem VII before Sem I). Single-line sort comparator bug in StudentResults.jsx.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "StudentResults.jsx — semester-summary-card",
+        "issue": "Summary table rows are sorted OLDEST-first (I, II, III, IV, V, VI, VII) instead of LATEST-first as required. The detail cards below the table are correctly latest-first (VII, VI, V, IV, III, II, I). Bug is in the inline .sort() comparator on the summary card: it uses `ROMAN_ORDER.indexOf(b.semester) - ROMAN_ORDER.indexOf(a.semester)`. Since ROMAN_ORDER = [VIII, VII, ..., I] (lower index = newer), latest-first needs `indexOf(a) - indexOf(b)` (NOT b - a). Fix: in /app/frontend/src/pages/StudentResults.jsx around line 141-145, swap (b, a) to (a, b) — i.e., change `ROMAN_ORDER.indexOf(b.semester) - ROMAN_ORDER.indexOf(a.semester)` to `ROMAN_ORDER.indexOf(a.semester) - ROMAN_ORDER.indexOf(b.semester)`. Same logic the parent `ordered` already uses on line 25.",
+        "selector": "[data-testid=\"semester-summary-card\"] tbody tr",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_portal_api.py",
+    "/app/backend/tests/test_iteration6.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix sort comparator in /app/frontend/src/pages/StudentResults.jsx — semester-summary-card .sort() should be `ROMAN_ORDER.indexOf(a.semester) - ROMAN_ORDER.indexOf(b.semester)` (matches parent `ordered` array). Currently inverted, so VII-first requirement is NOT met; user sees I, II, III, IV, V, VI, VII top-to-bottom."
+  ],
+  "critical_code_review_comments": [
+    "Summary card re-sorts the already-sorted `ordered` array with an inverted comparator — easy to miss. Suggest just doing `{ordered.map(...)}` directly since `ordered` (line 24-26) is already in latest-first order, eliminating the duplicate sort entirely.",
+    "Backend processor.py iteration 6 changes verified: parse_tc_excel_sheet now extracts cuml_earned_credits (col 14), generate_tc_pdf renders 'Cumulative Earned Credits' label per student (>=4 occurrences on page 1, matching 4 students per page), TC last page contains all 5 signature labels including 'Examination Controller (VMSB UTU)', GS PDF page-1 has GRADE SHEET title with no 'PROVISIONAL' or 'SL. NO.', Director + Examination Controller present, ≥3 images embedded (institute + UTU + barcode).",
+    "TC PDF still A3 portrait (842×1191 pt) with exactly 4 students on page 1 — verified by counting 'University Roll No' occurrences."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6.py (NEW — 7 iteration-6 specific tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (40/40 — 33 prior + 7 new)",
+    "frontend": "85% (summary card renders + correct testids + correct position; ONLY the row-sort order is wrong)"
+  },
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: 220090170001 (no DOB).",
+  "seed_data_creation": "Reuses /app/samples/aiml.xlsx — uploaded once via /api/admin/uploads/excel as B.Tech AIML 2022 during the iteration-6 fixture run. Idempotent.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend iteration-6 work is fully verified (40/40). The only outstanding bug is one frontend sort-comparator inversion on summary-card rows — single-character / single-line fix. After fix, retest with student 220090170001 → row order should be Sem VII, VI, V, IV, III, II, I top-to-bottom and the summary-row-* DOM order should match. New file /app/backend/tests/test_iteration6.py is the canonical regression suite for iteration-6 spec.",
+  "rca of the issue": "Bug RCA: /app/frontend/src/pages/StudentResults.jsx line ~140-145 in the semester-summary-card creates `[...ordered].sort((a, b) => ROMAN_ORDER.indexOf(b.semester) - ROMAN_ORDER.indexOf(a.semester))`. ROMAN_ORDER is defined latest-first ([VIII, VII, VI, V, IV, III, II, I]) so lower index = LATER semester. The parent `ordered` (line 24-26) correctly does `indexOf(a) - indexOf(b)` which yields VII before I. The summary-card comparator is the OPPOSITE (b - a) which gives I before VII. Repro: log in as 220090170001 → /student/results → observe summary table rows = Sem I … Sem VII (oldest first). Detail cards below ARE correct (VII first). Mitigation (one-line fix): replace `ROMAN_ORDER.indexOf(b.semester) - ROMAN_ORDER.indexOf(a.semester)` with `ROMAN_ORDER.indexOf(a.semester) - ROMAN_ORDER.indexOf(b.semester)` (or simpler: drop the [...ordered].sort(...) wrapper and just iterate `ordered` directly since it is already latest-first)."
+}

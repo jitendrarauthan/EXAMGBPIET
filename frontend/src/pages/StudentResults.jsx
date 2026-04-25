@@ -111,6 +111,87 @@ export default function StudentResults() {
           </Card>
         )}
 
+        {/* Semester-wise summary table */}
+        {ordered.length > 0 && (
+          <Card
+            data-testid="semester-summary-card"
+            className="bg-white border border-stone-200 p-8 md:p-10 rounded-sm shadow-sm fade-up"
+          >
+            <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
+              Academic summary
+            </p>
+            <h3 className="font-display text-3xl mt-1">
+              Semester-wise overview
+            </h3>
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-[0.15em] text-stone-500 border-b border-stone-200">
+                    <th className="text-left p-2 font-semibold">Semester</th>
+                    <th className="text-left p-2 font-semibold">Session</th>
+                    <th className="text-right p-2 font-semibold">SGPA</th>
+                    <th className="text-right p-2 font-semibold">CGPA</th>
+                    <th className="text-right p-2 font-semibold">Earned Cr.</th>
+                    <th className="text-left p-2 font-semibold">Result</th>
+                    <th className="text-left p-2 font-semibold">Remark</th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono">
+                  {[...ordered]
+                    .sort(
+                      (a, b) =>
+                        ROMAN_ORDER.indexOf(b.semester) -
+                        ROMAN_ORDER.indexOf(a.semester),
+                    )
+                    .map((r) => {
+                      const backCount = (r.subjects || []).filter(
+                        (s) => s.back,
+                      ).length;
+                      return (
+                        <tr
+                          key={r.semester}
+                          data-testid={`summary-row-${r.semester}`}
+                          className="border-t border-stone-100 hover:bg-stone-50"
+                        >
+                          <td className="p-2 font-semibold">
+                            Sem {r.semester}
+                          </td>
+                          <td className="p-2 text-xs text-stone-600">
+                            {r.exam_session}
+                          </td>
+                          <td className="p-2 text-right">{r.sgpa || "—"}</td>
+                          <td className="p-2 text-right">{r.cgpa || "—"}</td>
+                          <td className="p-2 text-right">
+                            {r.earned_credits || "—"}
+                          </td>
+                          <td className="p-2">
+                            <span
+                              className={
+                                r.result?.toLowerCase().includes("pass")
+                                  ? "text-emerald-700 font-semibold"
+                                  : "text-amber-800 font-semibold"
+                              }
+                            >
+                              {r.result || "—"}
+                            </span>
+                            {backCount > 0 && (
+                              <span className="ml-2 text-xs text-amber-900">
+                                ({backCount} back*)
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2 text-xs text-stone-600">
+                            {r.remark || "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
         {ordered.map((r, idx) => {
           const backCount = (r.subjects || []).filter((s) => s.back).length;
           return (
