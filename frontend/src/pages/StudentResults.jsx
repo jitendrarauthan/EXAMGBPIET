@@ -137,13 +137,7 @@ export default function StudentResults() {
                   </tr>
                 </thead>
                 <tbody className="font-mono">
-                  {[...ordered]
-                    .sort(
-                      (a, b) =>
-                        ROMAN_ORDER.indexOf(b.semester) -
-                        ROMAN_ORDER.indexOf(a.semester),
-                    )
-                    .map((r) => {
+                  {ordered.map((r) => {
                       const backCount = (r.subjects || []).filter(
                         (s) => s.back,
                       ).length;
