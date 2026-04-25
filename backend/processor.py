@@ -984,9 +984,8 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
 
 def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
     """Per-page decorations for GS: faint institute-logo watermark drawn
-    BENEATH the flowables. Kept for backward compatibility — the visible
-    watermark is now drawn in `_draw_gs_watermark_on_top` via onPageEnd so it
-    shows over opaque table-row backgrounds."""
+    BENEATH the flowables. Kept as a softer base; the more visible watermark
+    is drawn in `_draw_gs_watermark_on_top` via onPageEnd."""
     canv.saveState()
     page_w, page_h = doc.pagesize
     if watermark_path and Path(watermark_path).exists():
@@ -1003,6 +1002,84 @@ def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
             canv.setFillAlpha(1)
         except Exception:
             pass
+    canv.restoreState()
+
+
+def _draw_gs_signature_footer(canv, doc):
+    """Per-page signature row at the bottom of every GS page (Prepared by,
+    Checked by, Examination Controller, Director). Drawn directly on the
+    canvas so it appears even when the per-student story doesn't reach the
+    bottom of the frame."""
+    canv.saveState()
+    page_w, _page_h = doc.pagesize
+    margin = 14 * mm
+    y = 14 * mm
+    cell_w = (page_w - 2 * margin) / 4.0
+    labels = [
+        "Prepared by", "Checked by", "Examination Controller", "Director",
+    ]
+    canv.setLineWidth(0.5)
+    canv.setStrokeColor(colors.HexColor("#9ca3af"))
+    canv.line(margin, y + 4, page_w - margin, y + 4)
+    canv.setFont("Helvetica-Bold", 9.5)
+    canv.setFillColor(colors.HexColor("#1c1917"))
+    for i, lbl in enumerate(labels):
+        x = margin + i * cell_w + cell_w / 2
+        canv.drawCentredString(x, y - 4, lbl)
+    canv.restoreState()
+
+
+def _draw_gs_header(canv, doc):
+    """Draws the institute strip + side logos directly on the GS page canvas.
+
+    The institute name auto-shrinks to fit a single line within the available
+    width between the two logos. Subsequent affiliation lines render at a
+    fixed smaller size."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    canv.saveState()
+    page_w, page_h = doc.pagesize
+    margin = 14 * mm
+    logo_size = 20 * mm
+    top_y = page_h - 4 * mm  # top edge of logo
+
+    # Logos
+    if INSTITUTE_LOGO.exists():
+        try:
+            canv.drawImage(
+                str(INSTITUTE_LOGO), margin, top_y - logo_size,
+                width=logo_size, height=logo_size,
+                mask="auto", preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+    if UTU_LOGO.exists():
+        try:
+            canv.drawImage(
+                str(UTU_LOGO), page_w - margin - logo_size, top_y - logo_size,
+                width=logo_size, height=logo_size,
+                mask="auto", preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+
+    cx = page_w / 2
+    canv.setFillColor(colors.black)
+
+    # Available text width between the logos (with 4mm padding either side).
+    text_w = page_w - 2 * margin - 2 * (logo_size + 4 * mm)
+    name_text = _INSTITUTE_LINES[0]
+    # Auto-shrink the institute name to the largest size that fits in one line
+    name_size = 13.5
+    while name_size > 9 and stringWidth(name_text, "Helvetica-Bold", name_size) > text_w:
+        name_size -= 0.25
+
+    canv.setFont("Helvetica-Bold", name_size)
+    canv.drawCentredString(cx, top_y - 5 * mm, name_text)
+    canv.setFont("Helvetica-Bold", 10.5)
+    canv.drawCentredString(cx, top_y - 10 * mm, _INSTITUTE_LINES[1])
+    canv.setFont("Helvetica", 9)
+    canv.drawCentredString(cx, top_y - 14.5 * mm, _INSTITUTE_LINES[2])
+    canv.drawCentredString(cx, top_y - 18.5 * mm, _INSTITUTE_LINES[3])
     canv.restoreState()
 
 
@@ -1054,46 +1131,63 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
     buf = io.BytesIO()
     page = A4
     margin = 14 * mm
+    bottom_h = 26 * mm  # leave room for the canvas-drawn signature footer
+    top_h = 30 * mm     # leave room for the canvas-drawn institute header
     doc = BaseDocTemplate(
         buf, pagesize=page,
         leftMargin=margin, rightMargin=margin,
-        topMargin=12 * mm, bottomMargin=22 * mm,
+        topMargin=top_h, bottomMargin=bottom_h,
     )
     frame = Frame(
-        margin, 22 * mm, page[0] - 2 * margin, page[1] - 12 * mm - 22 * mm,
+        margin, bottom_h, page[0] - 2 * margin, page[1] - top_h - bottom_h,
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
         showBoundary=0,
     )
+
+    def _gs_on_page(c, d):
+        _draw_gs_decoration(c, d, str(INSTITUTE_LOGO))
+        _draw_gs_header(c, d)
+        _draw_gs_signature_footer(c, d)
+
+    def _gs_on_page_end(c, d):
+        _draw_gs_watermark_on_top(c, d, str(INSTITUTE_LOGO))
+
     doc.addPageTemplates([PageTemplate(
         id="gs", frames=[frame],
-        onPage=lambda c, d: _draw_gs_decoration(c, d, str(INSTITUTE_LOGO)),
-        onPageEnd=lambda c, d: _draw_gs_watermark_on_top(c, d, str(INSTITUTE_LOGO)),
+        onPage=_gs_on_page,
+        onPageEnd=_gs_on_page_end,
     )])
 
     st = _styles()
     page_width_mm = page[0] / mm - 2 * (margin / mm)
     story = []
 
+    # Map of {roll_no: gs_hash} so the caller can persist verification codes.
+    hash_map: Dict[str, str] = {}
+
     for idx, rec in enumerate(records):
-        # ---- Verification hash (8 hex chars) — combines roll, sem, sgpa, cgpa
-        # to produce a stable per-record code printed under the barcode.
+        # ---- Verification hash (12 hex chars) — deterministic and unique
+        # per (roll, semester, exam_session). Built from immutable identity
+        # fields so re-uploading the same Excel produces the same code.
         import hashlib
-        verify_seed = (
-            f"{rec.get('roll_no','')}|{semester_roman}|"
-            f"{rec.get('sgpa','')}|{rec.get('cgpa','')}|"
-            f"{rec.get('result','')}"
+        seed = (
+            f"{rec.get('roll_no','')}|{rec.get('enroll_no','')}|"
+            f"{semester_roman}|{exam_session}|{rec.get('name','')}"
         )
-        verify_hash = hashlib.sha256(verify_seed.encode("utf-8")).hexdigest()[:10].upper()
+        verify_hash = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12].upper()
+        rec["gs_hash"] = verify_hash
+        if rec.get("roll_no"):
+            hash_map[rec["roll_no"]] = verify_hash
         bc_payload = f"{rec.get('roll_no','')}-{verify_hash}"
 
         # ---- Top-right barcode (replaces SL.NO.) ----
         bc_top = _make_barcode_png(bc_payload)
         if bc_top is not None:
             try:
-                top_bc = RLImage(bc_top, width=50 * mm, height=11 * mm)
+                top_bc = RLImage(bc_top, width=52 * mm, height=11 * mm)
                 hash_p = Paragraph(
-                    f"<font size='6.5' face='Helvetica' color='#57534e'>"
-                    f"Verification: <b>{verify_hash}</b></font>",
+                    f"<font size='8' face='Helvetica-Bold' color='#1c1917'>"
+                    f"{verify_hash}</font>",
                     st["small"],
                 )
                 top_table = Table(
@@ -1113,27 +1207,9 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             except Exception:
                 pass
 
-        # ---- Institute strip — exactly 4 lines, institute name largest ----
-        gs_header_styles = [
-            (
-                "<font size='13' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
-                st["sub"],
-            ),
-            (
-                "<font size='10.5' face='Helvetica-Bold'>Pauri Garhwal, Uttarakhand</font>",
-                st["sub"],
-            ),
-            (
-                "<font size='9'>(An Autonomous Institute of the Government of Uttarakhand)</font>",
-                st["small"],
-            ),
-            (
-                "<font size='9'>(Affiliated to Veer Madho Singh Bhandari Uttarakhand Technical University)</font>",
-                st["small"],
-            ),
-        ]
-        story.append(_logo_header(gs_header_styles, total_width_mm=page_width_mm, logo_size_mm=18))
-        story.append(Spacer(1, 2 * mm))
+        # Institute strip is rendered by the canvas via _draw_gs_header on
+        # every page, so the story starts directly with the GRADE SHEET title
+        # band below.
 
         # ---- Title band — programme / branch / semester+session each on its own line ----
         title_band = Table([[Paragraph(
@@ -1352,21 +1428,8 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
                 st["label"],
             ))
 
-        story.append(Spacer(1, 14 * mm))
-
-        # ---- Signature row at the bottom (Director AFTER Examination Controller) ----
-        sig = Table([
-            ["Prepared by", "Checked by", "Examination Controller", "Director"]
-        ], colWidths=[(page_width_mm / 4) * mm] * 4,
-            style=TableStyle([
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#1c1917")),
-                ("TOPPADDING", (0, 0), (-1, -1), 22),
-                ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.HexColor("#9ca3af")),
-            ]))
-        story.append(KeepTogether([sig]))
+        # Signature row is rendered as a per-page canvas footer
+        # (`_draw_gs_signature_footer`), so we do NOT add it to the story.
         if idx + 1 < len(records):
             story.append(PageBreak())
 

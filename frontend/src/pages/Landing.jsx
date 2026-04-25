@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
-import { ShieldCheck, GraduationCap, FileText, ArrowRight } from "lucide-react";
+import { ShieldCheck, GraduationCap, FileText, ArrowRight, BadgeCheck } from "lucide-react";
 
 export default function Landing() {
   return (
@@ -42,7 +42,7 @@ export default function Landing() {
           of every transcript — ready for download or distribution.
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-14">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-14">
           <Link
             to="/admin/login"
             data-testid="enter-admin-portal"
@@ -80,6 +80,26 @@ export default function Landing() {
             </p>
             <div className="mt-8 inline-flex items-center gap-2 text-red-900 font-medium group-hover:gap-3 transition-all">
               Check results <ArrowRight className="w-4 h-4" />
+            </div>
+          </Link>
+
+          <Link
+            to="/verify"
+            data-testid="enter-verify-portal"
+            className="group bg-white border border-stone-200 p-8 hover:border-emerald-700 transition-all"
+          >
+            <BadgeCheck className="w-7 h-7 text-emerald-700" strokeWidth={1.5} />
+            <p className="text-xs uppercase tracking-[0.2em] text-stone-500 mt-6 font-semibold">
+              For Verifiers
+            </p>
+            <h2 className="font-display text-3xl mt-2">Verify a Grade Sheet</h2>
+            <p className="text-stone-600 text-sm mt-3 leading-relaxed">
+              Confirm the authenticity of any GBPIET Grade Sheet by entering
+              the printed verification code. Each GS carries a unique code
+              tied to the student record.
+            </p>
+            <div className="mt-8 inline-flex items-center gap-2 text-emerald-700 font-medium group-hover:gap-3 transition-all">
+              Open verifier <ArrowRight className="w-4 h-4" />
             </div>
           </Link>
         </div>

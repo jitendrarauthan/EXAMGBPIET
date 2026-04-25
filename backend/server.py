@@ -475,6 +475,7 @@ async def upload_excel_only(
                     "remark": rec.get("remark", ""),
                     "earned_credits": rec.get("earned_credits", ""),
                     "cuml_earned_credits": cuml,
+                    "gs_hash": rec.get("gs_hash", ""),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }},
                 upsert=True,
@@ -660,6 +661,45 @@ async def student_login(body: StudentLoginIn):
     order = {r: i for i, r in enumerate(["I","II","III","IV","V","VI","VII","VIII"])}
     results.sort(key=lambda r: order.get(r.get("semester","I"), 0), reverse=True)
     return {"student": student, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Public Grade-Sheet verification — looks up a GS by its printed hash code
+# ---------------------------------------------------------------------------
+@api.get("/verify/{gs_hash}")
+async def verify_grade_sheet(gs_hash: str):
+    h = (gs_hash or "").strip().upper()
+    if not h or len(h) < 6:
+        raise HTTPException(400, "Invalid hash")
+    res = await db.results.find_one({"gs_hash": h}, {"_id": 0})
+    if not res:
+        raise HTTPException(404, "No grade sheet found for this verification code")
+    student = await db.students.find_one(
+        {"roll_no": res.get("roll_no", "")}, {"_id": 0}
+    ) or {}
+    return {
+        "gs_hash": h,
+        "student": {
+            "name": student.get("name", ""),
+            "father_name": student.get("father_name", ""),
+            "roll_no": student.get("roll_no", res.get("roll_no", "")),
+            "enroll_no": student.get("enroll_no", ""),
+            "program": student.get("program", res.get("program", "")),
+            "branch": student.get("branch", res.get("branch", "")),
+            "batch": student.get("batch", res.get("batch", "")),
+        },
+        "result": {
+            "semester": res.get("semester", ""),
+            "exam_session": res.get("exam_session", ""),
+            "sgpa": res.get("sgpa", ""),
+            "cgpa": res.get("cgpa", ""),
+            "earned_credits": res.get("earned_credits", ""),
+            "cuml_earned_credits": res.get("cuml_earned_credits", ""),
+            "result": res.get("result", ""),
+            "remark": res.get("remark", ""),
+            "subjects": res.get("subjects", []),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

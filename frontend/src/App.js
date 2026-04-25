@@ -12,6 +12,7 @@ import AdminFiles from "@/pages/AdminFiles";
 import AdminStudents from "@/pages/AdminStudents";
 import StudentLogin from "@/pages/StudentLogin";
 import StudentResults from "@/pages/StudentResults";
+import Verify from "@/pages/Verify";
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
           </Route>
           <Route path="/student" element={<StudentLogin />} />
           <Route path="/student/results" element={<StudentResults />} />
+          <Route path="/verify" element={<Verify />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
