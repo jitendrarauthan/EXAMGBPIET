@@ -1,0 +1,36 @@
+{
+  "summary": "Full e2e testing of GBPIET Result Asterisk Portal: 14/14 backend pytest tests passed, all critical frontend flows working. The reported admin login form-submission issue could NOT be reproduced — login fires /api/auth/login, navigates to /admin overview, displays stats and uploads correctly. End-to-end student portal flow (login -> /student/results) verified with sample roll 230090107001 (Civil Eng, V Sem) showing semester results correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/stats backlogs_total + apply_back_markers (processor.py)", "issue": "stats reports backlogs_total=0 even when SEM excel detects 20 back students. This means apply_back_markers (matching back subjects from Excel into TC/GS records) is not actually flagging subject.back=true when persisted. Possible root cause: roll numbers in AIML excel SEM_I don't align with roll numbers in tc.pdf (TC is AIML batch presumably 2025 starting roll 250090170*** while Excel is for 2022 AIML batch with rolls 220090170***). UI shows '20 BACKS (EXCEL)' from upload count but '0 BACK SUBJECTS FLAGGED' in stats — confirms no record-level merge happened. Recommend: either (a) document that Excel must be the same batch as TC/GS, or (b) fall back to fuzzy/last-three-digit roll matching, or (c) surface a warning when 0/N rolls match between Excel and TC records."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Auth bootstrap on /student/results", "issue": "Two console 401 errors observed (likely /api/auth/me triggered by AuthProvider on every route including student portal). Harmless but noisy — consider skipping /auth/me when not on /admin route or suppressing console errors for expected 401.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_portal_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Investigate why apply_back_markers is not flagging any backs into the persisted result records despite Excel back detection working (sample TC vs sample Excel may belong to different AIML batches — surface a warning when intersection of Excel rolls and TC rolls is empty).",
+    "Optional: skip /auth/me on non-admin routes to avoid spurious 401 errors in student portal."
+  ],
+  "critical_code_review_comments": [
+    "AdminLogin.jsx form submission verified working end-to-end — the suspected bug is NOT present. Form's onSubmit fires, login API is called, token stored in localStorage as 'admin_token', cookie set httpOnly+secure+samesite=none, and navigation to /admin succeeds.",
+    "AdminLayout.jsx correctly handles dual-auth state (cookie OR Bearer token via hasToken localStorage check) so even if cookie auth fails (cross-site cookies on preview domain), Bearer token still authorizes the user.",
+    "processor.apply_back_markers logic likely silently no-ops when sample TC and sample Excel belong to different batches; should log warning when 0 of N rolls intersect.",
+    "server.py does not split /admin endpoints by router; file size acceptable (<520 lines).",
+    "Mongo _id properly excluded from all responses ({\"_id\": 0} projections used consistently)."
+  ],
+  "updated_files": ["/app/backend/tests/__init__.py", "/app/backend/tests/test_portal_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: roll 230090107001 with any DOB (works after gs.pdf is uploaded).",
+  "seed_data_creation": "Test fixtures upload tc.pdf+aiml.xlsx (B.Tech AIML 2022 SEM_I) and gs.pdf (B.Tech Civil 2023 SEM_V) into the live DB. These are reusable seed data for subsequent runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite at /app/backend/tests/test_portal_api.py — 14 tests, runs in ~25s, hits real preview URL. The aiml.xlsx file has rolls for 2022 batch while tc.pdf has different (likely 2025) batch rolls; the back-marker join therefore yields 0 actual marked subjects in DB even though Excel reports backs. This is the most likely original confusion behind the 'admin login redirect issue' report — login itself is fine, but admin saw '0 back subjects flagged' on overview which may have looked wrong.",
+  "rca of the issue": "Reported admin-login redirect bug NOT reproducible. The form has data-testid=admin-login-submit, onSubmit=submit handler calls login() from useAuth which POSTs /api/auth/login (verified via network capture), stores token in localStorage and navigates to /admin via react-router. Manual browser test in the original report likely failed due to (a) clicking the button before form mount, (b) a stale preview build before hot-reload, or (c) an aborted navigation when screenshot tool overlay covered the button. Latest preview build works flawlessly."
+}
