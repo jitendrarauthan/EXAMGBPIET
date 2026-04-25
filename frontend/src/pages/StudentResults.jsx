@@ -25,6 +25,26 @@ export default function StudentResults() {
     (a, b) => ROMAN_ORDER.indexOf(a.semester) - ROMAN_ORDER.indexOf(b.semester)
   );
 
+  // Sum 'a/b' style mark strings → "totalA/totalB" for the semester.
+  const sumTotalMarks = (subjects) => {
+    let a = 0,
+      b = 0,
+      hit = false;
+    (subjects || []).forEach((s) => {
+      const m = (s.total || "").match(/^(-?\d+)\s*\/\s*(\d+)$/);
+      if (m) {
+        a += parseInt(m[1], 10);
+        b += parseInt(m[2], 10);
+        hit = true;
+      }
+    });
+    return hit ? `${a}/${b}` : "—";
+  };
+
+  // A subject is highlighted only when it was marked back AND the student
+  // actually cleared it (i.e. did not get F / Ab / Dt).
+  const isCleared = (s) => s.back && !s.back_pending;
+
   return (
     <div className="min-h-screen bg-stone-100">
       <header className="bg-white border-b border-stone-200 print:hidden">
@@ -145,16 +165,15 @@ export default function StudentResults() {
                     <th className="text-left p-2 font-semibold">Session</th>
                     <th className="text-right p-2 font-semibold">SGPA</th>
                     <th className="text-right p-2 font-semibold">CGPA</th>
+                    <th className="text-right p-2 font-semibold">Total Marks</th>
                     <th className="text-right p-2 font-semibold">Earned Cr.</th>
+                    <th className="text-right p-2 font-semibold">Cum. Earned Cr.</th>
                     <th className="text-left p-2 font-semibold">Result</th>
                     <th className="text-left p-2 font-semibold">Remark</th>
                   </tr>
                 </thead>
                 <tbody className="font-mono">
                   {ordered.map((r) => {
-                      const backCount = (r.subjects || []).filter(
-                        (s) => s.back,
-                      ).length;
                       return (
                         <tr
                           key={r.semester}
@@ -170,7 +189,13 @@ export default function StudentResults() {
                           <td className="p-2 text-right">{r.sgpa || "—"}</td>
                           <td className="p-2 text-right">{r.cgpa || "—"}</td>
                           <td className="p-2 text-right">
+                            {sumTotalMarks(r.subjects)}
+                          </td>
+                          <td className="p-2 text-right">
                             {r.earned_credits || "—"}
+                          </td>
+                          <td className="p-2 text-right">
+                            {r.cuml_earned_credits || r.earned_credits || "—"}
                           </td>
                           <td className="p-2">
                             <span
@@ -182,11 +207,6 @@ export default function StudentResults() {
                             >
                               {r.result || "—"}
                             </span>
-                            {backCount > 0 && (
-                              <span className="ml-2 text-xs text-amber-900">
-                                ({backCount} back*)
-                              </span>
-                            )}
                           </td>
                           <td className="p-2 text-xs text-stone-600">
                             {r.remark || "—"}
@@ -201,7 +221,9 @@ export default function StudentResults() {
         )}
 
         {ordered.map((r, idx) => {
-          const backCount = (r.subjects || []).filter((s) => s.back).length;
+          const hasMarks = (r.subjects || []).some(
+            (s) => s.external || s.total
+          );
           return (
             <Card
               key={r.semester}
@@ -240,11 +262,6 @@ export default function StudentResults() {
                       <span className="font-semibold">{r.result}</span>
                     </p>
                   )}
-                  {backCount > 0 && (
-                    <p className="text-amber-900 font-semibold">
-                      {backCount} back subject{backCount > 1 ? "s" : ""} *
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -254,7 +271,7 @@ export default function StudentResults() {
                     <th className="text-left p-2 font-semibold w-28">Code</th>
                     <th className="text-left p-2 font-semibold">Subject</th>
                     <th className="text-right p-2 font-semibold w-16">Cr.</th>
-                    {(r.subjects?.[0]?.external) && (
+                    {hasMarks && (
                       <>
                         <th className="text-right p-2 font-semibold">Ext</th>
                         <th className="text-right p-2 font-semibold">Ses</th>
@@ -266,33 +283,36 @@ export default function StudentResults() {
                   </tr>
                 </thead>
                 <tbody className="font-mono">
-                  {(r.subjects || []).map((s, i) => (
-                    <tr
-                      key={i}
-                      className={`border-t border-stone-100 ${
-                        s.back ? "bg-amber-50" : ""
-                      }`}
-                    >
-                      <td className="p-2">{s.code}</td>
-                      <td className="p-2 sans">
-                        {s.back ? (
-                          <span className="subject-back">{s.name}</span>
-                        ) : (
-                          s.name
+                  {(r.subjects || []).map((s, i) => {
+                    const cleared = isCleared(s);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-t border-stone-100 ${
+                          cleared ? "bg-amber-50" : ""
+                        }`}
+                      >
+                        <td className="p-2">{s.code}</td>
+                        <td className="p-2 sans">
+                          {cleared ? (
+                            <span className="subject-back">{s.name}</span>
+                          ) : (
+                            s.name
+                          )}
+                        </td>
+                        <td className="p-2 text-right">{s.credits}</td>
+                        {hasMarks && (
+                          <>
+                            <td className="p-2 text-right">{s.external || "—"}</td>
+                            <td className="p-2 text-right">{s.sessional || "—"}</td>
+                            <td className="p-2 text-right">{s.total || "—"}</td>
+                          </>
                         )}
-                      </td>
-                      <td className="p-2 text-right">{s.credits}</td>
-                      {s.external && (
-                        <>
-                          <td className="p-2 text-right">{s.external}</td>
-                          <td className="p-2 text-right">{s.sessional}</td>
-                          <td className="p-2 text-right">{s.total}</td>
-                        </>
-                      )}
-                      <td className="p-2 text-right">{s.grade}</td>
-                      <td className="p-2 text-right">{s.grade_points}</td>
-                    </tr>
-                  ))}
+                        <td className="p-2 text-right">{s.grade}</td>
+                        <td className="p-2 text-right">{s.grade_points}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {r.remark && (

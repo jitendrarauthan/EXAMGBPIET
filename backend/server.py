@@ -426,16 +426,39 @@ async def upload_excel_only(
             gs_out = gs_path.name
 
         # Persist per-student result for this semester (prefer GS — cleanest)
+        # Merge in TC's external/sessional/total marks (GS sheets don't have
+        # them) so the student portal can display the same per-subject marks
+        # breakdown that the TC PDF shows.
+        tc_by_roll = {r.get("roll_no", ""): r for r in tc_records}
         for rec in (gs_records or tc_records):
             roll = rec.get("roll_no")
             if not roll:
                 continue
+            tc_rec = tc_by_roll.get(roll)
+            if tc_rec and rec is not tc_rec:
+                tc_subj_by_code = {
+                    s.get("code", "").replace(" ", "").upper(): s
+                    for s in tc_rec.get("subjects", [])
+                }
+                for s in rec.get("subjects", []):
+                    key = s.get("code", "").replace(" ", "").upper()
+                    tcs = tc_subj_by_code.get(key)
+                    if tcs:
+                        for f in ("external", "sessional", "total"):
+                            if not s.get(f):
+                                s[f] = tcs.get(f, "")
+                        if tcs.get("back_pending") and not s.get("back_pending"):
+                            s["back_pending"] = True
             rolls_known[roll] = {
                 "roll_no": roll,
                 "name": rec.get("name", ""),
                 "father_name": rec.get("father_name", ""),
                 "enroll_no": rec.get("enroll_no", ""),
             }
+            # Cumulative earned credits comes only from TC — copy if missing.
+            cuml = rec.get("cuml_earned_credits") or (
+                tc_rec.get("cuml_earned_credits") if tc_rec else ""
+            )
             await db.results.update_one(
                 {"roll_no": roll, "semester": sem},
                 {"$set": {
@@ -451,6 +474,7 @@ async def upload_excel_only(
                     "result": rec.get("result", ""),
                     "remark": rec.get("remark", ""),
                     "earned_credits": rec.get("earned_credits", ""),
+                    "cuml_earned_credits": cuml,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }},
                 upsert=True,
