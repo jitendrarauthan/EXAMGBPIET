@@ -5,8 +5,12 @@ PDF & Excel processing utilities for the Result Asterisk Portal.
 - Parses GS (Provisional Grade Sheet) PDFs: one student per page.
 - Parses SEM_X excel sheets: detects highlighted (yellow / blue) cells per
   (roll_no, subject_code) which represent BACK / failed subjects.
+- Parses TC_X / GS_X excel sheets to extract structured per-student records
+  directly (so admin can upload only an Excel file and we still generate all
+  semester TC*/GS* PDFs).
 - Generates new TC*/GS* PDFs in the same visual format with " *" appended
-  to subject names where a back exists.
+  to subject names where a back exists. GS pages also embed a Code-128
+  barcode (encoded with the university roll number).
 """
 from __future__ import annotations
 
@@ -92,6 +96,178 @@ def parse_sem_excel(file_bytes: bytes) -> Dict[str, Dict[str, Dict[str, bool]]]:
             if student_back:
                 sem_map[roll] = student_back
         out[sem] = sem_map
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Excel parsing — TC_X and GS_X sheets -> per-student records
+# ---------------------------------------------------------------------------
+
+_SEM_RE = re.compile(r"^(TC|GS)[_ ]?(I{1,3}|IV|V|VI{1,3}|VIII)$", re.I)
+
+
+def _norm(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def _is_grade(g: str) -> bool:
+    return bool(g) and bool(re.match(r"^([A-Z][+\-]?|Excellent|Ab|F|P|D|E)$", g))
+
+
+def parse_tc_excel_sheet(ws) -> List[dict]:
+    """Parse a TC_X sheet -> list of student records.
+
+    Block boundaries: rows starting with 'MM' in column A (case-insensitive).
+    """
+    records: List[dict] = []
+    rows = ws.max_row
+    block_starts: List[int] = []
+    for r in range(1, rows + 1):
+        v = _norm(ws.cell(r, 1).value)
+        if v.upper() == "MM":
+            # ensure it's the per-student MM marker (col 3 == "SC")
+            if _norm(ws.cell(r, 3).value).upper() == "SC":
+                block_starts.append(r)
+    block_starts.append(rows + 1)  # sentinel
+
+    for i in range(len(block_starts) - 1):
+        r0, r1 = block_starts[i], block_starts[i + 1]
+        rec: dict = {"subjects": []}
+        # student header row at r0+1 (Name | <Name> | | Father's Name: | <Father> | | University Roll No: | | <Roll> | | University Enrol. No: | <Enroll>)
+        hdr_row = r0 + 1
+        if hdr_row >= r1:
+            continue
+        rec["name"] = _norm(ws.cell(hdr_row, 2).value)
+        rec["father_name"] = _norm(ws.cell(hdr_row, 5).value)
+        rec["roll_no"] = _norm(ws.cell(hdr_row, 9).value)
+        rec["enroll_no"] = _norm(ws.cell(hdr_row, 12).value)
+        if not rec["roll_no"]:
+            continue
+        # subjects: scan rows r0+3 .. r1-1; subject row has a code in col1 and grade in col 12 (or 13)
+        for rr in range(hdr_row + 2, r1):
+            code = _norm(ws.cell(rr, 1).value)
+            name = _norm(ws.cell(rr, 2).value)
+            credits = _norm(ws.cell(rr, 6).value)
+            ext = _norm(ws.cell(rr, 7).value)
+            ses = _norm(ws.cell(rr, 9).value)
+            tot = _norm(ws.cell(rr, 11).value)
+            grade = _norm(ws.cell(rr, 12).value)
+            gp = _norm(ws.cell(rr, 13).value)
+            low = code.lower()
+            if not code or low.startswith("subject") or low.startswith("total"):
+                # Capture summary / result rows
+                if low.startswith("result"):
+                    rec["result"] = _norm(ws.cell(rr, 2).value)
+                    rec["remark"] = _norm(ws.cell(rr, 5).value)
+                    rec["sgpa"] = _norm(ws.cell(rr, 8).value)
+                    rec["cgpa"] = _norm(ws.cell(rr, 10).value)
+                    rec["earned_credits"] = _norm(ws.cell(rr, 12).value)
+                continue
+            if re.match(r"^[A-Z]{2,4}\s?\d{2,4}$", code):
+                rec["subjects"].append({
+                    "code": code,
+                    "name": name,
+                    "credits": credits,
+                    "external": ext,
+                    "sessional": ses,
+                    "total": tot,
+                    "grade": grade,
+                    "grade_points": gp,
+                    "back": False,
+                })
+        # Try to format SGPA/CGPA nicely
+        for k in ("sgpa", "cgpa"):
+            v = rec.get(k, "")
+            try:
+                rec[k] = f"{float(v):.2f}"
+            except Exception:
+                pass
+        if rec["subjects"]:
+            records.append(rec)
+    return records
+
+
+def parse_gs_excel_sheet(ws) -> List[dict]:
+    """Parse a GS_X sheet -> list of student records.
+
+    Block boundaries: rows where col A starts with 'Name:' AND col F contains 'University Roll'.
+    """
+    records: List[dict] = []
+    rows = ws.max_row
+    block_starts: List[int] = []
+    for r in range(1, rows + 1):
+        v = _norm(ws.cell(r, 1).value)
+        f = _norm(ws.cell(r, 6).value)
+        if v.startswith("Name:") and f.startswith("University Roll"):
+            block_starts.append(r)
+    block_starts.append(rows + 1)
+
+    for i in range(len(block_starts) - 1):
+        r0, r1 = block_starts[i], block_starts[i + 1]
+        rec: dict = {"subjects": []}
+        rec["name"] = _norm(ws.cell(r0, 3).value)
+        rec["roll_no"] = _norm(ws.cell(r0, 9).value)
+        rec["father_name"] = _norm(ws.cell(r0 + 1, 3).value)
+        rec["enroll_no"] = _norm(ws.cell(r0 + 1, 9).value)
+        if not rec["roll_no"]:
+            continue
+        # Subjects start after the "Subject Code" header row
+        for rr in range(r0 + 3, r1):
+            code = _norm(ws.cell(rr, 1).value)
+            name = _norm(ws.cell(rr, 3).value)
+            credits = _norm(ws.cell(rr, 8).value)
+            grade = _norm(ws.cell(rr, 9).value)
+            gp = _norm(ws.cell(rr, 10).value)
+            low = code.lower()
+            if not code:
+                continue
+            if low.startswith("total"):
+                continue
+            if low.startswith("earned"):
+                # Earned Credits / SGPA / CGPA row
+                rec["earned_credits"] = _norm(ws.cell(rr, 3).value)
+                rec["sgpa"] = _norm(ws.cell(rr, 6).value)
+                rec["cgpa"] = _norm(ws.cell(rr, 9).value)
+                continue
+            if low.startswith("result"):
+                rec["result"] = _norm(ws.cell(rr, 2).value)
+                rec["remark"] = _norm(ws.cell(rr, 6).value)
+                continue
+            if re.match(r"^[A-Z]{2,4}\s?\d{2,4}$", code):
+                rec["subjects"].append({
+                    "code": code,
+                    "name": name,
+                    "credits": credits,
+                    "grade": grade,
+                    "grade_points": gp,
+                    "back": False,
+                })
+        for k in ("sgpa", "cgpa"):
+            v = rec.get(k, "")
+            try:
+                rec[k] = f"{float(v):.2f}"
+            except Exception:
+                pass
+        if rec["subjects"]:
+            records.append(rec)
+    return records
+
+
+def parse_tc_gs_excel(file_bytes: bytes) -> Dict[str, Dict[str, List[dict]]]:
+    """Parse all TC_X / GS_X sheets. Returns {'TC': {sem: records}, 'GS': {sem: records}}."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    out: Dict[str, Dict[str, List[dict]]] = {"TC": {}, "GS": {}}
+    for sname in wb.sheetnames:
+        m = _SEM_RE.match(sname.strip())
+        if not m:
+            continue
+        kind = m.group(1).upper()
+        sem = m.group(2).upper()
+        ws = wb[sname]
+        if kind == "TC":
+            out["TC"][sem] = parse_tc_excel_sheet(ws)
+        else:
+            out["GS"][sem] = parse_gs_excel_sheet(ws)
     return out
 
 
@@ -386,6 +562,28 @@ UTU_LOGO = _ASSETS / "utu_logo.png"
 
 from reportlab.platypus import Image as RLImage  # noqa: E402
 
+# Barcode generation (Code 128) — used on every GS page
+import barcode as _barcode_lib  # noqa: E402
+from barcode.writer import ImageWriter  # noqa: E402
+
+
+def _make_barcode_png(code_text: str) -> Optional[io.BytesIO]:
+    """Generate a Code-128 barcode PNG for the given text. Returns BytesIO."""
+    if not code_text:
+        return None
+    try:
+        Code128 = _barcode_lib.get_barcode_class("code128")
+        buf = io.BytesIO()
+        # write_text=False keeps the image clean; we render text below ourselves
+        Code128(code_text, writer=ImageWriter()).write(
+            buf,
+            options={"module_width": 0.30, "module_height": 8.0, "write_text": False, "quiet_zone": 1.0},
+        )
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
 
 def _logo_header(text_lines, total_width_mm: float, logo_size_mm: float = 22):
     """Build a 3-column row: [institute logo] [stacked text lines] [UTU logo]."""
@@ -639,7 +837,38 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
         ]))
         story.append(t)
 
-        story.append(Spacer(1, 12 * mm))
+        # Barcode block — encodes university roll number; placed at bottom-right
+        # below the result table, above signatures. Always present (regardless
+        # of SL.NO).
+        bc_buf = _make_barcode_png(rec.get("roll_no", "") or sl_no)
+        if bc_buf is not None:
+            try:
+                bc_img = RLImage(bc_buf, width=55 * mm, height=14 * mm)
+                bc_table = Table(
+                    [[
+                        "",
+                        Paragraph(
+                            f"<para alignment='right'><font size='8'>{rec.get('roll_no','')}</font><br/>"
+                            f"<font size='6'>Verification barcode</font></para>",
+                            st["label"],
+                        ),
+                        bc_img,
+                    ]],
+                    colWidths=[80 * mm, 35 * mm, 59 * mm],
+                )
+                bc_table.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]))
+                story.append(bc_table)
+            except Exception:
+                pass
+
+        story.append(Spacer(1, 8 * mm))
         story.append(Table([["Prepared by", "", "Checked by", "", "Examination Controller"]],
                             colWidths=[35 * mm] * 5,
                             style=TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),

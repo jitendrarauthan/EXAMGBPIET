@@ -2,12 +2,28 @@ import { useEffect, useState } from "react";
 import { api, fmtError } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Trash2, ChevronDown, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+
+function downloadFromAuth(url, filename) {
+  const tok = localStorage.getItem("admin_token");
+  return fetch(`${process.env.REACT_APP_BACKEND_URL}${url}`, {
+    headers: { Authorization: `Bearer ${tok}` },
+  }).then((r) => {
+    if (!r.ok) throw new Error("File not found");
+    return r.blob().then((blob) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+    });
+  });
+}
 
 export default function AdminFiles() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState({});
 
   const load = () =>
     api
@@ -19,23 +35,6 @@ export default function AdminFiles() {
   useEffect(() => {
     load();
   }, []);
-
-  const download = async (id, kind) => {
-    const tok = localStorage.getItem("admin_token");
-    const r = await fetch(
-      `${process.env.REACT_APP_BACKEND_URL}/api/admin/files/${id}/${kind}`,
-      { headers: { Authorization: `Bearer ${tok}` } }
-    );
-    if (!r.ok) {
-      toast.error("File not found");
-      return;
-    }
-    const blob = await r.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = kind === "tc" ? "TC_starred.pdf" : "GS_starred.pdf";
-    a.click();
-  };
 
   const remove = async (id) => {
     if (!window.confirm("Delete this upload and generated files?")) return;
@@ -55,8 +54,8 @@ export default function AdminFiles() {
       </p>
       <h1 className="font-display text-4xl mt-1">Generated files</h1>
       <p className="text-stone-600 text-sm mt-2">
-        Every upload produces a starred TC* and / or GS* PDF that can be
-        downloaded any time.
+        Every upload produces starred TC* and GS* PDFs that can be downloaded
+        any time. Excel-only uploads expand to show per-semester files.
       </p>
 
       <div className="mt-8 space-y-3">
@@ -69,58 +68,156 @@ export default function AdminFiles() {
             </p>
           </Card>
         )}
-        {items.map((u) => (
-          <Card
-            key={u.id}
-            data-testid={`file-row-${u.id}`}
-            className="p-5 rounded-sm border-stone-200 shadow-none flex items-center justify-between gap-4"
-          >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">
-                {u.program} · <span className="text-stone-700">{u.branch}</span>
-              </p>
-              <p className="text-xs text-stone-500 mt-1 font-mono">
-                Batch {u.batch} · Sem {u.semester} · {u.exam_session} · TC=
-                {u.tc_count} · GS={u.gs_count} · backs={u.back_students_in_sem}
-              </p>
-              <p className="text-xs text-stone-400 mt-1 font-mono">
-                {new Date(u.created_at).toLocaleString()}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {u.tc_file && (
-                <Button
-                  onClick={() => download(u.id, "tc")}
-                  data-testid={`dl-tc-${u.id}`}
-                  size="sm"
-                  className="rounded-sm bg-indigo-950 hover:bg-indigo-900"
-                >
-                  <Download className="w-3.5 h-3.5 mr-1.5" /> TC*
-                </Button>
+        {items.map((u) => {
+          const isExcel = u.source === "excel-only";
+          const open = expanded[u.id];
+          return (
+            <Card
+              key={u.id}
+              data-testid={`file-row-${u.id}`}
+              className="rounded-sm border-stone-200 shadow-none overflow-hidden"
+            >
+              <div className="p-5 flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">
+                      {u.program} ·{" "}
+                      <span className="text-stone-700">{u.branch}</span>
+                    </p>
+                    {isExcel && (
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.15em] bg-indigo-950 text-white px-2 py-0.5 rounded-sm">
+                        <Sparkles className="w-3 h-3" /> excel-only
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-stone-500 mt-1 font-mono">
+                    Batch {u.batch} ·{" "}
+                    {isExcel ? "All sems" : `Sem ${u.semester}`} ·{" "}
+                    {u.exam_session} · TC={u.tc_count} · GS={u.gs_count}
+                  </p>
+                  <p className="text-xs text-stone-400 mt-1 font-mono">
+                    {new Date(u.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isExcel ? (
+                    <Button
+                      onClick={() =>
+                        setExpanded((p) => ({ ...p, [u.id]: !open }))
+                      }
+                      size="sm"
+                      variant="outline"
+                      data-testid={`expand-${u.id}`}
+                      className="rounded-sm border-stone-300"
+                    >
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 mr-1.5 transition-transform ${
+                          open ? "rotate-180" : ""
+                        }`}
+                      />
+                      {open ? "Hide" : "Show"} files
+                    </Button>
+                  ) : (
+                    <>
+                      {u.tc_file && (
+                        <Button
+                          onClick={() =>
+                            downloadFromAuth(
+                              `/api/admin/files/${u.id}/tc`,
+                              "TC_starred.pdf"
+                            ).catch((e) => toast.error(e.message))
+                          }
+                          data-testid={`dl-tc-${u.id}`}
+                          size="sm"
+                          className="rounded-sm bg-indigo-950 hover:bg-indigo-900"
+                        >
+                          <Download className="w-3.5 h-3.5 mr-1.5" /> TC*
+                        </Button>
+                      )}
+                      {u.gs_file && (
+                        <Button
+                          onClick={() =>
+                            downloadFromAuth(
+                              `/api/admin/files/${u.id}/gs`,
+                              "GS_starred.pdf"
+                            ).catch((e) => toast.error(e.message))
+                          }
+                          data-testid={`dl-gs-${u.id}`}
+                          size="sm"
+                          variant="outline"
+                          className="rounded-sm border-stone-300"
+                        >
+                          <Download className="w-3.5 h-3.5 mr-1.5" /> GS*
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  <Button
+                    onClick={() => remove(u.id)}
+                    data-testid={`del-${u.id}`}
+                    size="sm"
+                    variant="ghost"
+                    className="rounded-sm text-stone-400 hover:text-red-700"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+              {isExcel && open && (
+                <div className="border-t border-stone-200 bg-stone-50 p-4 space-y-1.5">
+                  {(u.semesters || []).map((s) => (
+                    <div
+                      key={s.semester}
+                      data-testid={`sem-files-${u.id}-${s.semester}`}
+                      className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-sm hover:bg-white"
+                    >
+                      <div className="font-mono text-xs">
+                        <span className="font-semibold">Sem {s.semester}</span>
+                        <span className="text-stone-500 ml-2">
+                          TC {s.tc_count} · GS {s.gs_count} ·{" "}
+                          {s.asterisks_applied} *
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        {s.tc_file && (
+                          <Button
+                            onClick={() =>
+                              downloadFromAuth(
+                                `/api/admin/files/${u.id}/sem/${s.semester}/tc`,
+                                `TC_${s.semester}_starred.pdf`
+                              ).catch((e) => toast.error(e.message))
+                            }
+                            size="sm"
+                            data-testid={`dl-sem-tc-${u.id}-${s.semester}`}
+                            className="rounded-sm bg-indigo-950 hover:bg-indigo-900 h-7 text-xs"
+                          >
+                            <Download className="w-3 h-3 mr-1" /> TC*
+                          </Button>
+                        )}
+                        {s.gs_file && (
+                          <Button
+                            onClick={() =>
+                              downloadFromAuth(
+                                `/api/admin/files/${u.id}/sem/${s.semester}/gs`,
+                                `GS_${s.semester}_starred.pdf`
+                              ).catch((e) => toast.error(e.message))
+                            }
+                            size="sm"
+                            variant="outline"
+                            data-testid={`dl-sem-gs-${u.id}-${s.semester}`}
+                            className="rounded-sm border-stone-300 h-7 text-xs"
+                          >
+                            <Download className="w-3 h-3 mr-1" /> GS*
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
-              {u.gs_file && (
-                <Button
-                  onClick={() => download(u.id, "gs")}
-                  data-testid={`dl-gs-${u.id}`}
-                  size="sm"
-                  variant="outline"
-                  className="rounded-sm border-stone-300"
-                >
-                  <Download className="w-3.5 h-3.5 mr-1.5" /> GS*
-                </Button>
-              )}
-              <Button
-                onClick={() => remove(u.id)}
-                data-testid={`del-${u.id}`}
-                size="sm"
-                variant="ghost"
-                className="rounded-sm text-stone-400 hover:text-red-700"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

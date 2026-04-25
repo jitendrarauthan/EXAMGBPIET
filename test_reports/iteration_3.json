@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 3 — validated (a) new POST /api/admin/uploads/excel single-Excel-all-semesters endpoint, (b) per-semester download endpoints /api/admin/files/{id}/sem/{sem}/{tc|gs}, (c) Code-128 barcode embedded on every GS page (3+ images on page1: institute logo + UTU logo + barcode), (d) /api/admin/uploads now returns excel-only uploads with source='excel-only' + nested semesters[] array, (e) frontend Tabs UI on /admin/upload (Excel-only default + PDF mode) and expandable per-semester rows on /admin/files. 24/24 backend pytest tests pass (added 8 new TestExcelOnly tests). Frontend e2e flow on the live preview URL: 7 semesters (210 asterisks total, ~440 students indexed), all TC*/GS* download buttons render and per-semester rows expand on Generated Files page. Student portal still works without DOB.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "AuthProvider on /student route", "issue": "Pre-existing — two console 401s from /api/auth/me on student routes (cosmetic only, not a regression).", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_portal_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py upload_excel_only — clean separation: parses TC_/GS_/SEM_ sheets, applies back markers per-semester, writes per-sem PDFs to storage, persists per-student results in MongoDB, returns aggregated response with semesters[] array.",
+    "server.py download_sem_file — uses StreamingResponse with proper Content-Disposition, raises 404 cleanly when file missing.",
+    "processor.py _make_barcode_png + generate_gs_pdf — barcode embedded via FlowableBarcode (Code-128) tied to roll_no, independent of SL.NO. Verified via PyMuPDF: GS page 1 contains >=3 images (institute logo + UTU logo + barcode) for excel-only-generated PDFs.",
+    "Frontend AdminUpload.jsx — Tabs from shadcn; defaultValue='excel'. Both ExcelOnlyMode and PdfMode share ProgrammePicker and FileSlot — clean DRY split. data-testid coverage strong (tab-excel, tab-pdf, excel-submit-btn, sem-row-{sem}, dl-sem-tc-{sem}, dl-sem-gs-{sem}, expand-{id}, sem-files-{id}-{sem}).",
+    "Frontend AdminFiles.jsx — excel-only badge only renders when u.source==='excel-only' (correct branching); expand toggle stores per-id state in dict; per-sem download URLs use /api/admin/files/{id}/sem/{sem}/{kind} matching backend.",
+    "Edge case: server.py raises 400 with helpful message when uploaded workbook has no TC_/GS_ sheets — verified by test_excel_only_invalid_workbook_400.",
+    "Edge case: missing 'excel' file part returns 422 (FastAPI default) — verified by test_excel_only_missing_file_422.",
+    "AdminFiles.jsx — list view no longer eagerly downloads PDFs; respects isExcel flag for display. ✓",
+    "PdfMode regression: original /api/admin/uploads still works for TC PDF + Excel + GS PDF flow; existing tests (TestUploads suite) all pass."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_portal_api.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: roll 250090170001 (no DOB).",
+  "seed_data_creation": "Reuses /app/samples/aiml.xlsx, tc.pdf, gs.pdf. Tests are idempotent (upserts). New excel-only upload created during test run is appended to /admin/uploads list.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "24 backend pytest tests in /app/backend/tests/test_portal_api.py — runs in ~71s. New TestExcelOnly class covers all 7 acceptance criteria for the excel-only flow. Barcode presence verified via fitz.Document.get_images(full=True) returning >=3 images on GS page 1. Frontend e2e covers excel-only generation (7 sems, 14 download btns), tab switching, AdminFiles expand, and student portal results display.",
+  "rca of the issue": "N/A — feature validation, no bugs found. All 7 backend acceptance criteria + 5 frontend acceptance criteria met."
+}

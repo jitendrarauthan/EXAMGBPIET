@@ -38,6 +38,7 @@ from processor import (
     generate_tc_pdf,
     parse_gs_pdf,
     parse_sem_excel,
+    parse_tc_gs_excel,
     parse_tc_pdf,
 )
 
@@ -342,6 +343,161 @@ async def upload_files(
         "gs_url": f"/api/admin/files/{upload_id}/gs" if gs_out_path else None,
         "students": students_payload,
     }
+
+
+@api.post("/admin/uploads/excel")
+async def upload_excel_only(
+    program: str = Form(...),
+    branch: str = Form(...),
+    batch: str = Form(...),
+    exam_session: str = Form("December 2025"),
+    excel: UploadFile = File(...),
+    user: dict = Depends(get_current_admin),
+):
+    """Upload a single Excel containing TC_X / GS_X / SEM_X sheets for all
+    semesters of a batch+branch. Generates per-semester TC*/GS* PDFs with
+    asterisks (from highlighted SEM_X cells) and barcodes on every GS page.
+    """
+    raw = await excel.read()
+    upload_id = str(uuid.uuid4())
+    folder = STORAGE / upload_id
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "input.xlsx").write_bytes(raw)
+
+    # Parse all TC_X / GS_X sheets, plus SEM_X back map (highlighted cells)
+    tc_gs = parse_tc_gs_excel(raw)
+    sem_back = parse_sem_excel(raw)
+    log.info("Excel parsed: TC sems=%s, GS sems=%s, SEM back sems=%s",
+              list(tc_gs["TC"].keys()), list(tc_gs["GS"].keys()), list(sem_back.keys()))
+
+    semesters_seen = sorted(
+        set(tc_gs["TC"].keys()) | set(tc_gs["GS"].keys()),
+        key=lambda r: ["I","II","III","IV","V","VI","VII","VIII"].index(r),
+    )
+    if not semesters_seen:
+        raise HTTPException(
+            400,
+            "No TC_X or GS_X sheets found in the Excel. Sheet names should be "
+            "TC_I, TC_II, ..., GS_I, GS_II, etc.",
+        )
+
+    sem_results: List[dict] = []
+    rolls_known: dict = {}
+    total_back_marks = 0
+    for sem in semesters_seen:
+        back_map = sem_back.get(sem, {})
+        tc_records = tc_gs["TC"].get(sem, [])
+        gs_records = tc_gs["GS"].get(sem, [])
+        a1, _ = apply_back_markers(tc_records, back_map)
+        a2, _ = apply_back_markers(gs_records, back_map)
+        total_back_marks += a1 + a2
+
+        tc_out = None
+        if tc_records:
+            pdf_bytes = generate_tc_pdf(tc_records, program, branch, sem, exam_session)
+            tc_path = folder / f"TC_{sem}_starred.pdf"
+            tc_path.write_bytes(pdf_bytes)
+            tc_out = tc_path.name
+        gs_out = None
+        if gs_records:
+            pdf_bytes = generate_gs_pdf(gs_records, program, branch, sem, exam_session, batch)
+            gs_path = folder / f"GS_{sem}_starred.pdf"
+            gs_path.write_bytes(pdf_bytes)
+            gs_out = gs_path.name
+
+        # Persist per-student result for this semester (prefer GS — cleanest)
+        for rec in (gs_records or tc_records):
+            roll = rec.get("roll_no")
+            if not roll:
+                continue
+            rolls_known[roll] = {
+                "roll_no": roll,
+                "name": rec.get("name", ""),
+                "father_name": rec.get("father_name", ""),
+                "enroll_no": rec.get("enroll_no", ""),
+            }
+            await db.results.update_one(
+                {"roll_no": roll, "semester": sem},
+                {"$set": {
+                    "roll_no": roll,
+                    "semester": sem,
+                    "program": program,
+                    "branch": branch,
+                    "batch": batch,
+                    "exam_session": exam_session,
+                    "subjects": rec.get("subjects", []),
+                    "sgpa": rec.get("sgpa", ""),
+                    "cgpa": rec.get("cgpa", ""),
+                    "result": rec.get("result", ""),
+                    "remark": rec.get("remark", ""),
+                    "earned_credits": rec.get("earned_credits", ""),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+                upsert=True,
+            )
+        sem_results.append({
+            "semester": sem,
+            "tc_count": len(tc_records),
+            "gs_count": len(gs_records),
+            "tc_file": tc_out,
+            "gs_file": gs_out,
+            "backs_in_sem": len(back_map),
+            "asterisks_applied": a1 + a2,
+        })
+
+    # Upsert students
+    for r, info in rolls_known.items():
+        await db.students.update_one(
+            {"roll_no": r},
+            {"$set": {**info, "program": program, "branch": branch, "batch": batch}},
+            upsert=True,
+        )
+
+    upload_doc = {
+        "id": upload_id,
+        "program": program,
+        "branch": branch,
+        "batch": batch,
+        "semester": "ALL",
+        "exam_session": exam_session,
+        "tc_count": sum(s["tc_count"] for s in sem_results),
+        "gs_count": sum(s["gs_count"] for s in sem_results),
+        "back_students_in_sem": sum(s["backs_in_sem"] for s in sem_results),
+        "tc_file": None,
+        "gs_file": None,
+        "semesters": sem_results,
+        "source": "excel-only",
+        "students_indexed": len(rolls_known),
+        "total_asterisks_applied": total_back_marks,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["email"],
+    }
+    await db.uploads.insert_one(dict(upload_doc))
+
+    return {
+        "upload_id": upload_id,
+        "semesters": sem_results,
+        "students_indexed": len(rolls_known),
+        "total_asterisks_applied": total_back_marks,
+    }
+
+
+@api.get("/admin/files/{upload_id}/sem/{semester}/{kind}")
+async def download_sem_file(upload_id: str, semester: str, kind: str,
+                              user: dict = Depends(get_current_admin)):
+    """Download a per-semester TC* or GS* generated from an Excel-only upload."""
+    folder = STORAGE / upload_id
+    sem = semester.upper()
+    if kind == "tc":
+        fp = folder / f"TC_{sem}_starred.pdf"
+        fname = f"TC_{sem}_starred.pdf"
+    else:
+        fp = folder / f"GS_{sem}_starred.pdf"
+        fname = f"GS_{sem}_starred.pdf"
+    if not fp.exists():
+        raise HTTPException(404, "Not found")
+    return StreamingResponse(open(fp, "rb"), media_type="application/pdf",
+                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 @api.get("/admin/uploads")

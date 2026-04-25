@@ -210,6 +210,119 @@ class TestStudent:
         d = r.json()
         assert d["student"]["roll_no"] == roll
 
+# ---------------- EXCEL-ONLY UPLOAD (iteration 3) ----------------
+@pytest.fixture(scope="session")
+def upload_excel_only(session, auth_headers):
+    """POST /api/admin/uploads/excel with the AIML.xlsx (TC_/GS_/SEM_ sheets)."""
+    files = {
+        "excel": ("aiml.xlsx", open(f"{SAMPLES}/aiml.xlsx", "rb"),
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    }
+    data = {
+        "program": "B.Tech",
+        "branch": "Computer Science & Engineering (AIML)",
+        "batch": "2022",
+        "exam_session": "December 2025",
+    }
+    r = session.post(f"{API}/admin/uploads/excel", data=data, files=files,
+                      headers=auth_headers, timeout=600)
+    assert r.status_code == 200, f"status={r.status_code} body={r.text[:500]}"
+    return r.json()
+
+
+class TestExcelOnly:
+    def test_excel_only_response_shape(self, upload_excel_only):
+        d = upload_excel_only
+        assert "upload_id" in d
+        assert isinstance(d["semesters"], list) and len(d["semesters"]) >= 1
+        assert d["students_indexed"] >= 50
+        assert d["total_asterisks_applied"] >= 0
+        for s in d["semesters"]:
+            assert s["semester"] in ["I","II","III","IV","V","VI","VII","VIII"]
+            assert "tc_count" in s and "gs_count" in s
+            assert "tc_file" in s and "gs_file" in s
+            assert "backs_in_sem" in s
+            assert "asterisks_applied" in s
+
+    def test_excel_only_missing_file_422(self, session, auth_headers):
+        # No 'excel' file part — FastAPI returns 422
+        r = session.post(f"{API}/admin/uploads/excel",
+                         data={"program": "B.Tech", "branch": "X", "batch": "2022"},
+                         headers=auth_headers, timeout=30)
+        assert r.status_code == 422, r.text
+
+    def test_excel_only_invalid_workbook_400(self, session, auth_headers):
+        # send a file with no TC_/GS_ sheets — should yield 400
+        bad = io.BytesIO()
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active.title = "Cover"
+        wb.active["A1"] = "no sheets"
+        wb.save(bad)
+        bad.seek(0)
+        files = {
+            "excel": ("bad.xlsx", bad,
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        }
+        data = {"program": "B.Tech", "branch": "Civil Engineering", "batch": "2022"}
+        r = session.post(f"{API}/admin/uploads/excel", data=data, files=files,
+                          headers=auth_headers, timeout=60)
+        assert r.status_code == 400, r.text
+        assert "TC_" in r.text or "GS_" in r.text
+
+    def test_download_sem_tc_pdf(self, session, auth_headers, upload_excel_only):
+        uid = upload_excel_only["upload_id"]
+        # find a semester that has tc_file
+        tc_sem = next((s["semester"] for s in upload_excel_only["semesters"]
+                        if s["tc_file"]), None)
+        assert tc_sem, "No TC sheet generated"
+        r = session.get(f"{API}/admin/files/{uid}/sem/{tc_sem}/tc",
+                         headers=auth_headers, timeout=60)
+        assert r.status_code == 200
+        assert r.headers.get("content-type", "").startswith("application/pdf")
+        assert len(r.content) > 1000
+
+    def test_download_sem_gs_pdf_with_barcode(self, session, auth_headers, upload_excel_only):
+        uid = upload_excel_only["upload_id"]
+        gs_sem = next((s["semester"] for s in upload_excel_only["semesters"]
+                        if s["gs_file"]), None)
+        assert gs_sem, "No GS sheet generated"
+        r = session.get(f"{API}/admin/files/{uid}/sem/{gs_sem}/gs",
+                         headers=auth_headers, timeout=60)
+        assert r.status_code == 200
+        assert r.headers.get("content-type", "").startswith("application/pdf")
+        # Verify GS page1 has >=3 images: institute logo + UTU logo + barcode
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        try:
+            assert doc.page_count >= 1
+            imgs = doc[0].get_images(full=True)
+            assert len(imgs) >= 3, (
+                f"Expected >=3 images (institute+UTU logos + barcode) on GS page1, "
+                f"got {len(imgs)}"
+            )
+        finally:
+            doc.close()
+
+    def test_download_sem_invalid_404(self, session, auth_headers, upload_excel_only):
+        uid = upload_excel_only["upload_id"]
+        # Sem X is not a valid Roman, and even if it were, no file exists
+        r = session.get(f"{API}/admin/files/{uid}/sem/X/gs",
+                         headers=auth_headers, timeout=30)
+        assert r.status_code == 404
+
+    def test_list_uploads_includes_excel_only(self, session, auth_headers, upload_excel_only):
+        r = session.get(f"{API}/admin/uploads", headers=auth_headers, timeout=30)
+        assert r.status_code == 200
+        ups = r.json()["uploads"]
+        match = next((u for u in ups
+                      if u["id"] == upload_excel_only["upload_id"]), None)
+        assert match is not None, "excel-only upload not in list"
+        assert match.get("source") == "excel-only"
+        assert isinstance(match.get("semesters"), list) and len(match["semesters"]) >= 1
+        assert match.get("tc_file") is None
+        assert match.get("gs_file") is None
+
+
     def test_student_login_valid(self, session, auth_headers, upload_tc_excel, upload_gs):
         # pick first roll from /admin/students
         sr = session.get(f"{API}/admin/students", headers=auth_headers, timeout=30)
