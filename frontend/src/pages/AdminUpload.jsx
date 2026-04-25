@@ -316,6 +316,14 @@ export default function AdminUpload() {
                 TC: {result.tc_count} students · GS: {result.gs_count} students ·
                 Back-marked students in SEM excel: {result.back_students}
               </p>
+              {result.warning && (
+                <p
+                  data-testid="upload-warning"
+                  className="text-red-900 text-sm mt-3 bg-red-50 border border-red-200 px-3 py-2 rounded-sm"
+                >
+                  ⚠ {result.warning}
+                </p>
+              )}
               <div className="flex gap-3 mt-5">
                 {result.tc_url && (
                   <Button

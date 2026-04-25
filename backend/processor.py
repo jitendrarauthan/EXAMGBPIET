@@ -329,12 +329,20 @@ def _parse_gs_page(text: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str, bool]]) -> int:
-    """Mutate records: append ' *' to subject name when SEM excel marks it as back. Return count."""
+def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str, bool]]) -> Tuple[int, int]:
+    """Mutate records: append ' *' to subject name when SEM excel marks it as back.
+
+    Returns (markers_applied, students_matched) — the latter is the number of
+    students for whom at least one Excel roll was found among the records.
+    """
     n = 0
+    matched = 0
+    record_rolls = {r.get("roll_no", "") for r in records}
     for rec in records:
         roll = rec.get("roll_no", "")
         backs = back_map_for_sem.get(roll, {})
+        if backs:
+            matched += 1
         for s in rec.get("subjects", []):
             code = s["code"].replace(" ", "").upper()
             for bcode in backs:
@@ -344,7 +352,18 @@ def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str
                         s["name"] = s["name"].rstrip() + " *"
                     n += 1
                     break
-    return n
+    if back_map_for_sem and matched == 0 and record_rolls:
+        # No roll-overlap between Excel and PDF — surface this for the caller.
+        sample_excel = next(iter(back_map_for_sem.keys()))
+        sample_pdf = next(iter(record_rolls))
+        import logging as _log
+        _log.getLogger("portal").warning(
+            "apply_back_markers: 0 of %d Excel rolls matched any PDF roll. "
+            "Excel sample=%s vs PDF sample=%s — Excel and PDF may belong to "
+            "different batches.",
+            len(back_map_for_sem), sample_excel, sample_pdf,
+        )
+    return n, matched
 
 
 # ---------------------------------------------------------------------------

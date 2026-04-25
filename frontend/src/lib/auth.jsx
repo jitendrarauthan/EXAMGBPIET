@@ -8,6 +8,14 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    // Only check auth on admin routes; student routes don't need it.
+    const path =
+      typeof window !== "undefined" ? window.location.pathname : "/";
+    if (!path.startsWith("/admin")) {
+      setUser(false);
+      setReady(true);
+      return;
+    }
     api
       .get("/auth/me")
       .then((r) => setUser(r.data))

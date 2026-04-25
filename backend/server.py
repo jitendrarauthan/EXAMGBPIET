@@ -228,12 +228,14 @@ async def upload_files(
     # 2. Parse + mark + regenerate TC
     tc_records = []
     tc_out_path = None
+    tc_matched = 0
     if tc_pdf:
         b = await tc_pdf.read()
         (folder / "input_tc.pdf").write_bytes(b)
         tc_records = parse_tc_pdf(b)
-        applied = apply_back_markers(tc_records, back_map_for_sem)
-        log.info("TC: parsed %d students, applied %d back markers", len(tc_records), applied)
+        applied, tc_matched = apply_back_markers(tc_records, back_map_for_sem)
+        log.info("TC: parsed %d students, applied %d back markers (matched=%d)",
+                  len(tc_records), applied, tc_matched)
         # Resolve program/branch from records or fall back to form values
         prog = (tc_records[0]["program"] if tc_records else "") or program
         br = (tc_records[0]["branch"] if tc_records else "") or branch
@@ -245,12 +247,14 @@ async def upload_files(
     # 3. Parse + mark + regenerate GS
     gs_records = []
     gs_out_path = None
+    gs_matched = 0
     if gs_pdf:
         b = await gs_pdf.read()
         (folder / "input_gs.pdf").write_bytes(b)
         gs_records = parse_gs_pdf(b)
-        applied = apply_back_markers(gs_records, back_map_for_sem)
-        log.info("GS: parsed %d students, applied %d back markers", len(gs_records), applied)
+        applied, gs_matched = apply_back_markers(gs_records, back_map_for_sem)
+        log.info("GS: parsed %d students, applied %d back markers (matched=%d)",
+                  len(gs_records), applied, gs_matched)
         prog = (gs_records[0]["program"] if gs_records else "") or program
         br = (gs_records[0]["branch"] if gs_records else "") or branch
         sem = (gs_records[0]["semester"] if gs_records else "") or semester
@@ -325,6 +329,15 @@ async def upload_files(
         "tc_count": len(tc_records),
         "gs_count": len(gs_records),
         "back_students": len(back_map_for_sem),
+        "tc_matched": tc_matched,
+        "gs_matched": gs_matched,
+        "warning": (
+            "0 of the highlighted-back students from the Excel sheet matched any roll "
+            "number in the uploaded PDFs. Make sure the Excel sheet and the PDFs "
+            "are for the same batch."
+            if back_map_for_sem and (tc_records or gs_records) and (tc_matched + gs_matched) == 0
+            else None
+        ),
         "tc_url": f"/api/admin/files/{upload_id}/tc" if tc_out_path else None,
         "gs_url": f"/api/admin/files/{upload_id}/gs" if gs_out_path else None,
         "students": students_payload,
