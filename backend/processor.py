@@ -983,12 +983,15 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
 
 
 def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
-    """Per-page decorations for GS: institute-logo watermark only (no footer text)."""
+    """Per-page decorations for GS: faint institute-logo watermark drawn
+    BENEATH the flowables. Kept for backward compatibility — the visible
+    watermark is now drawn in `_draw_gs_watermark_on_top` via onPageEnd so it
+    shows over opaque table-row backgrounds."""
     canv.saveState()
     page_w, page_h = doc.pagesize
     if watermark_path and Path(watermark_path).exists():
         try:
-            canv.setFillAlpha(0.07)
+            canv.setFillAlpha(0.05)
             wmark_w = 130 * mm
             wmark_h = 130 * mm
             canv.drawImage(
@@ -1000,6 +1003,30 @@ def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
             canv.setFillAlpha(1)
         except Exception:
             pass
+    canv.restoreState()
+
+
+def _draw_gs_watermark_on_top(canv, doc, watermark_path: str = ""):
+    """Draws the institute-logo watermark ON TOP of the page content with a
+    very low alpha so it's perceivable yet keeps the table text legible.
+    Called via onPageEnd after the frame has rendered."""
+    if not watermark_path or not Path(watermark_path).exists():
+        return
+    canv.saveState()
+    page_w, page_h = doc.pagesize
+    try:
+        canv.setFillAlpha(0.10)
+        wmark_w = 140 * mm
+        wmark_h = 140 * mm
+        canv.drawImage(
+            watermark_path,
+            (page_w - wmark_w) / 2, (page_h - wmark_h) / 2,
+            width=wmark_w, height=wmark_h, mask="auto",
+            preserveAspectRatio=True,
+        )
+        canv.setFillAlpha(1)
+    except Exception:
+        pass
     canv.restoreState()
 
 
@@ -1026,7 +1053,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
 
     buf = io.BytesIO()
     page = A4
-    margin = 18 * mm
+    margin = 14 * mm
     doc = BaseDocTemplate(
         buf, pagesize=page,
         leftMargin=margin, rightMargin=margin,
@@ -1040,29 +1067,47 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
     doc.addPageTemplates([PageTemplate(
         id="gs", frames=[frame],
         onPage=lambda c, d: _draw_gs_decoration(c, d, str(INSTITUTE_LOGO)),
+        onPageEnd=lambda c, d: _draw_gs_watermark_on_top(c, d, str(INSTITUTE_LOGO)),
     )])
 
     st = _styles()
-    page_width_mm = page[0] / mm - 36
+    page_width_mm = page[0] / mm - 2 * (margin / mm)
     story = []
 
     for idx, rec in enumerate(records):
+        # ---- Verification hash (8 hex chars) — combines roll, sem, sgpa, cgpa
+        # to produce a stable per-record code printed under the barcode.
+        import hashlib
+        verify_seed = (
+            f"{rec.get('roll_no','')}|{semester_roman}|"
+            f"{rec.get('sgpa','')}|{rec.get('cgpa','')}|"
+            f"{rec.get('result','')}"
+        )
+        verify_hash = hashlib.sha256(verify_seed.encode("utf-8")).hexdigest()[:10].upper()
+        bc_payload = f"{rec.get('roll_no','')}-{verify_hash}"
+
         # ---- Top-right barcode (replaces SL.NO.) ----
-        bc_top = _make_barcode_png(rec.get("roll_no", ""))
+        bc_top = _make_barcode_png(bc_payload)
         if bc_top is not None:
             try:
-                top_bc = RLImage(bc_top, width=44 * mm, height=11 * mm)
+                top_bc = RLImage(bc_top, width=50 * mm, height=11 * mm)
+                hash_p = Paragraph(
+                    f"<font size='6.5' face='Helvetica' color='#57534e'>"
+                    f"Verification: <b>{verify_hash}</b></font>",
+                    st["small"],
+                )
                 top_table = Table(
-                    [["", top_bc]],
-                    colWidths=[(page_width_mm - 50) * mm, 50 * mm],
+                    [[ "", top_bc ],
+                     [ "", hash_p ]],
+                    colWidths=[(page_width_mm - 56) * mm, 56 * mm],
                 )
                 top_table.setStyle(TableStyle([
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
+                    ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 0),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                     ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
                 ]))
                 story.append(top_table)
             except Exception:
@@ -1071,7 +1116,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         # ---- Institute strip — exactly 4 lines, institute name largest ----
         gs_header_styles = [
             (
-                "<font size='14' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
+                "<font size='13' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
                 st["sub"],
             ),
             (
@@ -1087,7 +1132,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
                 st["small"],
             ),
         ]
-        story.append(_logo_header(gs_header_styles, total_width_mm=page_width_mm, logo_size_mm=24))
+        story.append(_logo_header(gs_header_styles, total_width_mm=page_width_mm, logo_size_mm=18))
         story.append(Spacer(1, 2 * mm))
 
         # ---- Title band — programme / branch / semester+session each on its own line ----
@@ -1270,15 +1315,24 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         earned = rec.get("earned_credits") or str(total_credits)
         result_val = rec.get("result") or "—"
         remark_val = rec.get("remark") or ""
+        # Custom wide-leading style for stat cells so the label and value
+        # don't overlap (label 7.5pt → value 15pt requires ~9pt + 17pt of
+        # vertical room). Using <para leading> on a flowable text guarantees
+        # proper line spacing regardless of the parent style's leading.
+        def _stat_cell(label, value):
+            return Paragraph(
+                "<para alignment='center' leading='18' spaceBefore='0' spaceAfter='0'>"
+                f"<font size='7.5' color='#57534e'>{label}</font><br/>"
+                f"<font size='14' face='Helvetica-Bold'>{value}</font>"
+                "</para>",
+                st["label"],
+            )
+
         summary_top = Table([[
-            Paragraph(f"<font size='7.5' color='#57534e'>SGPA</font><br/>"
-                      f"<font size='15' face='Helvetica-Bold'>{sgpa}</font>", st["label"]),
-            Paragraph(f"<font size='7.5' color='#57534e'>CGPA</font><br/>"
-                      f"<font size='15' face='Helvetica-Bold'>{cgpa}</font>", st["label"]),
-            Paragraph(f"<font size='7.5' color='#57534e'>EARNED CREDITS</font><br/>"
-                      f"<font size='15' face='Helvetica-Bold'>{earned}</font>", st["label"]),
-            Paragraph(f"<font size='7.5' color='#57534e'>RESULT</font><br/>"
-                      f"<font size='15' face='Helvetica-Bold'>{result_val}</font>", st["label"]),
+            _stat_cell("SGPA", sgpa),
+            _stat_cell("CGPA", cgpa),
+            _stat_cell("EARNED CREDITS", earned),
+            _stat_cell("RESULT", result_val),
         ]], colWidths=[(page_width_mm / 4) * mm] * 4)
         summary_top.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
@@ -1286,8 +1340,8 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafaf9")),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ]))
         story.append(summary_top)
         if remark_val:

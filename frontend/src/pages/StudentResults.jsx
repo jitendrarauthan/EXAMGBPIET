@@ -16,7 +16,17 @@ export default function StudentResults() {
       nav("/student");
       return;
     }
-    setData(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    setData(parsed);
+    // Set a clean document.title so the browser's print header shows the
+    // student name & roll instead of "Emergent | Fullstack App".
+    const studentName = parsed?.student?.name || "Student";
+    const roll = parsed?.student?.roll_no || "";
+    const prevTitle = document.title;
+    document.title = `Result - ${studentName}${roll ? " (" + roll + ")" : ""}`;
+    return () => {
+      document.title = prevTitle;
+    };
   }, [nav]);
 
   if (!data) return null;
