@@ -76,8 +76,7 @@ export default function Landing() {
             <p className="text-stone-600 text-sm mt-3 leading-relaxed">
               View your complete semester-wise results. Subjects marked with
               <span className="subject-back mx-1 text-xs">*</span>
-              are back subjects. No password required — just roll number and
-              date of birth.
+              are back subjects. Just enter your roll number — no password needed.
             </p>
             <div className="mt-8 inline-flex items-center gap-2 text-red-900 font-medium group-hover:gap-3 transition-all">
               Check results <ArrowRight className="w-4 h-4" />

@@ -11,7 +11,6 @@ import { GraduationCap, Loader2 } from "lucide-react";
 export default function StudentLogin() {
   const nav = useNavigate();
   const [roll, setRoll] = useState("");
-  const [dob, setDob] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {
@@ -21,7 +20,7 @@ export default function StudentLogin() {
     try {
       const { data } = await api.post("/student/login", {
         roll_no: roll.trim(),
-        dob: dob.trim(),
+        dob: "",
       });
       sessionStorage.setItem("student_data", JSON.stringify(data));
       nav("/student/results");
@@ -49,7 +48,7 @@ export default function StudentLogin() {
         </p>
         <h1 className="font-display text-3xl mt-1">Check your results</h1>
         <p className="text-stone-600 text-sm mt-2">
-          Enter your university roll number and date of birth.
+          Enter your university roll number to view all your semester results.
         </p>
 
         <form onSubmit={submit} className="mt-8 space-y-4" data-testid="student-login-form">
@@ -63,19 +62,8 @@ export default function StudentLogin() {
               placeholder="e.g. 230090107001"
               data-testid="student-roll-input"
               className="mt-1 rounded-sm font-mono"
+              autoFocus
               required
-            />
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-[0.15em] text-stone-500">
-              Date of Birth
-            </Label>
-            <Input
-              type="date"
-              value={dob}
-              onChange={(e) => setDob(e.target.value)}
-              data-testid="student-dob-input"
-              className="mt-1 rounded-sm font-mono"
             />
           </div>
           <Button
@@ -92,8 +80,9 @@ export default function StudentLogin() {
           </Button>
         </form>
         <p className="text-xs text-stone-500 mt-6">
-          Your DOB is verified against the institute record. If your DOB has
-          not been registered yet, contact the examination cell.
+          Tip: subjects with a <span className="subject-back text-xs mx-1">*</span>
+          marker indicate carry-over (back) papers. Contact the examination
+          cell if your roll number isn&apos;t found.
         </p>
       </Card>
     </div>

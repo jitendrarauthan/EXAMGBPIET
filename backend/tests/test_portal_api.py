@@ -1,7 +1,9 @@
 """End-to-end backend tests for GBPIET Result Asterisk Portal."""
 import os
+import io
 import pytest
 import requests
+import fitz  # PyMuPDF
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://grade-sheet-hub.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
@@ -115,6 +117,15 @@ class TestUploads:
         # Excel should detect back students (yellow fills); allow >=1 to be tolerant
         assert d["back_students"] >= 1, f"backs not detected: {d['back_students']}"
 
+    def test_upload_response_match_fields(self, upload_tc_excel):
+        """New fields in upload response: tc_matched, gs_matched, warning."""
+        d = upload_tc_excel
+        assert "tc_matched" in d, "tc_matched missing in upload response"
+        assert "gs_matched" in d, "gs_matched missing in upload response"
+        assert "warning" in d, "warning key missing in upload response"
+        assert isinstance(d["tc_matched"], int)
+        assert isinstance(d["gs_matched"], int)
+
     def test_upload_gs_counts(self, upload_gs):
         d = upload_gs
         assert d["gs_count"] >= 50, f"GS count too low: {d['gs_count']}"
@@ -125,6 +136,14 @@ class TestUploads:
         assert r.status_code == 200
         assert r.headers.get("content-type", "").startswith("application/pdf")
         assert len(r.content) > 1000
+        # Verify logos are embedded on page 1
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        try:
+            assert doc.page_count >= 1
+            imgs = doc[0].get_images(full=True)
+            assert len(imgs) >= 2, f"Expected >=2 images (institute+UTU logos) on TC page1, got {len(imgs)}"
+        finally:
+            doc.close()
 
     def test_download_gs_pdf(self, session, auth_headers, upload_gs):
         uid = upload_gs["upload_id"]
@@ -132,6 +151,14 @@ class TestUploads:
         assert r.status_code == 200
         assert r.headers.get("content-type", "").startswith("application/pdf")
         assert len(r.content) > 1000
+        # Verify logos are embedded on page 1
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        try:
+            assert doc.page_count >= 1
+            imgs = doc[0].get_images(full=True)
+            assert len(imgs) >= 2, f"Expected >=2 images (institute+UTU logos) on GS page1, got {len(imgs)}"
+        finally:
+            doc.close()
 
     def test_list_uploads(self, session, auth_headers, upload_tc_excel):
         r = session.get(f"{API}/admin/uploads", headers=auth_headers, timeout=30)
@@ -158,14 +185,36 @@ class TestUploads:
 # ---------------- STUDENT PORTAL ----------------
 class TestStudent:
     def test_student_login_invalid(self, session):
-        r = session.post(f"{API}/student/login", json={"roll_no": "ZZZ999", "dob": ""}, timeout=30)
+        r = session.post(f"{API}/student/login", json={"roll_no": "ZZZ999"}, timeout=30)
         assert r.status_code == 404
+
+    def test_student_login_no_dob(self, session, auth_headers, upload_tc_excel, upload_gs):
+        """DOB removed: login with only roll_no must work."""
+        sr = session.get(f"{API}/admin/students", headers=auth_headers, timeout=30)
+        roll = sr.json()["students"][0]["roll_no"]
+        # NO dob in body
+        r = session.post(f"{API}/student/login", json={"roll_no": roll}, timeout=30)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["student"]["roll_no"] == roll
+        assert isinstance(d["results"], list)
+
+    def test_student_login_dob_ignored(self, session, auth_headers, upload_tc_excel, upload_gs):
+        """DOB is optional/ignored: passing any value still returns 200."""
+        sr = session.get(f"{API}/admin/students", headers=auth_headers, timeout=30)
+        roll = sr.json()["students"][0]["roll_no"]
+        r = session.post(f"{API}/student/login",
+                         json={"roll_no": roll, "dob": "anything-random"},
+                         timeout=30)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["student"]["roll_no"] == roll
 
     def test_student_login_valid(self, session, auth_headers, upload_tc_excel, upload_gs):
         # pick first roll from /admin/students
         sr = session.get(f"{API}/admin/students", headers=auth_headers, timeout=30)
         roll = sr.json()["students"][0]["roll_no"]
-        r = session.post(f"{API}/student/login", json={"roll_no": roll, "dob": "2000-01-01"}, timeout=30)
+        r = session.post(f"{API}/student/login", json={"roll_no": roll}, timeout=30)
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["student"]["roll_no"] == roll

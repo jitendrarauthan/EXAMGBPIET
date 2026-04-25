@@ -1,0 +1,34 @@
+{
+  "summary": "Validated three change-requests for GBPIET Result Asterisk Portal: (1) DOB removed from student portal, (2) GBPIET + UTU logos embedded in regenerated TC and GS PDFs, (3) upload response now includes tc_matched/gs_matched/warning fields. 17/17 backend pytest tests pass (was 14, added 3 new tests). All frontend flows verified end-to-end against preview URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/stats backlogs_total", "issue": "Pre-existing from iteration_1 — apply_back_markers silently no-ops when sample TC and Excel belong to different batches (rolls don't intersect). Not a regression. New 'warning' field in upload response now properly surfaces this case (verified)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Auth bootstrap on /student/results", "issue": "Pre-existing — two console 401 errors from /api/auth/me on student routes (AuthProvider runs on every route). Cosmetic only.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_portal_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "StudentLogin.jsx — DOB input fully removed; only roll_no field remains. Body still sends dob:'' for backwards compatibility (harmless, backend treats as optional).",
+    "AdminStudents.jsx — DOB column and 'Save DOBs' button removed (verified by absence in table headers and body text).",
+    "Landing.jsx student card copy reads 'Just enter your roll number — no password needed.' (verified).",
+    "server.py StudentLoginIn model has dob: str = '' default — endpoint accepts both {roll_no} and {roll_no, dob} payloads with 200 (verified by 2 dedicated tests).",
+    "processor.py _logo_header now embeds /app/backend/assets/institute_logo.png (left) and utu_logo.png (right) — verified via PyMuPDF page.get_images() returning >=2 images on page 1 of both TC and GS regenerated PDFs.",
+    "Upload response includes tc_matched, gs_matched, warning keys — verified."
+  ],
+  "updated_files": ["/app/backend/tests/test_portal_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: roll 230090107001 (no DOB needed).",
+  "seed_data_creation": "Reuses seed data from iteration_1: tc.pdf+aiml.xlsx (B.Tech AIML 2022 SEM_I) + gs.pdf (B.Tech Civil 2023 SEM_V). Tests are idempotent (upserts).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "17 backend tests in /app/backend/tests/test_portal_api.py — runs in ~24s. Logo presence checked via PyMuPDF (fitz). Student login no-DOB path covered by test_student_login_no_dob and test_student_login_dob_ignored. Frontend checks ran via Playwright on the live preview URL.",
+  "rca of the issue": "N/A — feature validation, no bugs found. All three change-requests implemented correctly."
+}

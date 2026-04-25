@@ -2,15 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { api, fmtError } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { Button } from "../components/ui/button";
 import { toast } from "sonner";
-import { Search, Download, Save } from "lucide-react";
+import { Search } from "lucide-react";
 
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [edits, setEdits] = useState({});
 
   useEffect(() => {
     api
@@ -31,26 +29,6 @@ export default function AdminStudents() {
     );
   }, [q, students]);
 
-  const saveDobs = async () => {
-    const items = Object.entries(edits)
-      .filter(([, v]) => v && v.trim())
-      .map(([roll_no, dob]) => ({ roll_no, dob }));
-    if (items.length === 0) {
-      toast.message("No changes");
-      return;
-    }
-    try {
-      const { data } = await api.post("/admin/students/dob", items);
-      toast.success(`Updated ${data.updated} DOBs`);
-      // refresh
-      const r = await api.get("/admin/students");
-      setStudents(r.data.students);
-      setEdits({});
-    } catch (e) {
-      toast.error(fmtError(e));
-    }
-  };
-
   const downloadGs = async (roll, sem) => {
     const tok = localStorage.getItem("admin_token");
     const r = await fetch(
@@ -70,25 +48,15 @@ export default function AdminStudents() {
 
   return (
     <div className="p-10 fade-up">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
-            Master register
-          </p>
-          <h1 className="font-display text-4xl mt-1">Students</h1>
-          <p className="text-stone-600 text-sm mt-2">
-            Set DOB to enable secure student-portal access. Roll-numbers are
-            populated automatically from uploaded TC / GS PDFs.
-          </p>
-        </div>
-        <Button
-          onClick={saveDobs}
-          data-testid="save-dobs-btn"
-          className="rounded-sm bg-indigo-950 hover:bg-indigo-900"
-        >
-          <Save className="w-4 h-4 mr-2" /> Save DOBs
-        </Button>
-      </div>
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
+        Master register
+      </p>
+      <h1 className="font-display text-4xl mt-1">Students</h1>
+      <p className="text-stone-600 text-sm mt-2">
+        Roll numbers populated automatically from uploaded TC / GS PDFs. Use the
+        Quick GS column to export a single-student starred grade sheet for any
+        semester on file.
+      </p>
 
       <div className="relative mt-8 max-w-md">
         <Search className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
@@ -112,15 +80,14 @@ export default function AdminStudents() {
                   <th className="text-left p-3">Name</th>
                   <th className="text-left p-3">Branch</th>
                   <th className="text-left p-3">Batch</th>
-                  <th className="text-left p-3">DOB (YYYY-MM-DD)</th>
-                  <th className="text-left p-3">Quick GS</th>
+                  <th className="text-left p-3">Quick GS export</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={5}
                       className="p-8 text-center text-stone-500 italic"
                     >
                       No students found.
@@ -136,17 +103,6 @@ export default function AdminStudents() {
                     <td className="p-3 sans">{s.name}</td>
                     <td className="p-3 text-stone-600 text-xs">{s.branch}</td>
                     <td className="p-3">{s.batch}</td>
-                    <td className="p-3">
-                      <Input
-                        type="date"
-                        defaultValue={s.dob || ""}
-                        onChange={(e) =>
-                          setEdits((p) => ({ ...p, [s.roll_no]: e.target.value }))
-                        }
-                        data-testid={`dob-${s.roll_no}`}
-                        className="h-8 rounded-sm w-44 text-xs"
-                      />
-                    </td>
                     <td className="p-3">
                       <div className="flex gap-1 flex-wrap">
                         {["I", "II", "III", "IV", "V", "VI", "VII", "VIII"].map(

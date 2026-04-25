@@ -148,7 +148,7 @@ class LoginIn(BaseModel):
 
 class StudentLoginIn(BaseModel):
     roll_no: str
-    dob: str  # YYYY-MM-DD
+    dob: str = ""  # optional, kept for backwards compatibility
 
 
 class DobItem(BaseModel):
@@ -438,17 +438,9 @@ async def set_dobs(items: List[DobItem], user: dict = Depends(get_current_admin)
 @api.post("/student/login")
 async def student_login(body: StudentLoginIn):
     roll = body.roll_no.strip()
-    dob = body.dob.strip()
     student = await db.students.find_one({"roll_no": roll}, {"_id": 0})
     if not student:
         raise HTTPException(404, "Roll number not found")
-    saved_dob = student.get("dob")
-    if saved_dob and saved_dob != dob:
-        raise HTTPException(401, "Date of birth does not match")
-    if not saved_dob:
-        # If no DOB recorded, allow access only when DOB string is empty too
-        # Soft-fallback: accept any DOB so students without DOB upload still see results
-        pass
     results = await db.results.find({"roll_no": roll}, {"_id": 0}).to_list(20)
     # sort latest first by roman numeral
     order = {r: i for i, r in enumerate(["I","II","III","IV","V","VI","VII","VIII"])}

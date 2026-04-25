@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import openpyxl
@@ -377,20 +378,65 @@ _INSTITUTE_LINES = [
     "(AFFILIATED TO VEER MADHO SINGH BHANDARI UTTARAKHAND TECHNICAL UNIVERSITY)",
 ]
 
+# Logo paths — extracted once from the original sample PDFs and bundled with the app.
+_ASSETS = Path(__file__).parent / "assets"
+INSTITUTE_LOGO = _ASSETS / "institute_logo.png"
+UTU_LOGO = _ASSETS / "utu_logo.png"
+
+
+from reportlab.platypus import Image as RLImage  # noqa: E402
+
+
+def _logo_header(text_lines, total_width_mm: float, logo_size_mm: float = 22):
+    """Build a 3-column row: [institute logo] [stacked text lines] [UTU logo]."""
+    text_cell = []
+    for txt, style in text_lines:
+        text_cell.append(Paragraph(txt, style))
+
+    inst = (
+        RLImage(str(INSTITUTE_LOGO), width=logo_size_mm * mm, height=logo_size_mm * mm)
+        if INSTITUTE_LOGO.exists()
+        else ""
+    )
+    utu = (
+        RLImage(str(UTU_LOGO), width=logo_size_mm * mm, height=logo_size_mm * mm)
+        if UTU_LOGO.exists()
+        else ""
+    )
+    text_w = total_width_mm - 2 * (logo_size_mm + 2)
+    t = Table(
+        [[inst, text_cell, utu]],
+        colWidths=[(logo_size_mm + 2) * mm, text_w * mm, (logo_size_mm + 2) * mm],
+    )
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (0, 0), "LEFT"),
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+        ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return t
+
 
 def _styles():
     s = getSampleStyleSheet()
     return {
         "title": ParagraphStyle("title", parent=s["Heading1"], fontName="Helvetica-Bold",
-                                 fontSize=11, alignment=1, spaceAfter=2),
+                                 fontSize=11, alignment=1, spaceAfter=2, leading=13),
         "sub": ParagraphStyle("sub", parent=s["Normal"], fontName="Helvetica",
-                               fontSize=9, alignment=1, spaceAfter=1),
+                               fontSize=9, alignment=1, spaceAfter=1, leading=11),
         "small": ParagraphStyle("small", parent=s["Normal"], fontName="Helvetica",
-                                 fontSize=8, alignment=1, spaceAfter=1),
+                                 fontSize=8, alignment=1, spaceAfter=1, leading=10),
         "section": ParagraphStyle("section", parent=s["Normal"], fontName="Helvetica-Bold",
-                                   fontSize=10, alignment=1, spaceBefore=4, spaceAfter=4),
+                                   fontSize=11, alignment=1, spaceBefore=4, spaceAfter=4,
+                                   leading=13),
         "label": ParagraphStyle("label", parent=s["Normal"], fontName="Helvetica",
                                  fontSize=9, alignment=0),
+        "right": ParagraphStyle("right", parent=s["Normal"], fontName="Helvetica",
+                                 fontSize=9, alignment=2),
         "back_subject": ParagraphStyle("back_subject", parent=s["Normal"],
                                         fontName="Helvetica-Bold", fontSize=8,
                                         textColor=colors.HexColor("#92400e"), alignment=0),
@@ -403,19 +449,22 @@ def generate_tc_pdf(records: List[dict], program: str, branch: str, semester_rom
                      exam_session: str = "December 2025") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=10 * mm,
-                             rightMargin=10 * mm, topMargin=10 * mm, bottomMargin=10 * mm)
+                             rightMargin=10 * mm, topMargin=8 * mm, bottomMargin=8 * mm)
     st = _styles()
     story = []
+    page_width_mm = landscape(A4)[0] / mm - 20  # margins
 
     def header_block():
-        story.append(Paragraph(_INSTITUTE_LINES[0], st["title"]))
-        story.append(Paragraph(_INSTITUTE_LINES[1], st["sub"]))
-        story.append(Paragraph(_INSTITUTE_LINES[2], st["small"]))
-        story.append(Paragraph(_INSTITUTE_LINES[3], st["small"]))
-        story.append(Paragraph(f"Tabulation Chart for {program}", st["section"]))
-        story.append(Paragraph(branch, st["sub"]))
-        story.append(Paragraph(f"{semester_roman} Semester {exam_session}", st["sub"]))
-        story.append(Spacer(1, 4 * mm))
+        story.append(_logo_header([
+            (_INSTITUTE_LINES[0], st["title"]),
+            (_INSTITUTE_LINES[1], st["sub"]),
+            (_INSTITUTE_LINES[2], st["small"]),
+            (_INSTITUTE_LINES[3], st["small"]),
+            (f"<b>Tabulation Chart for {program}</b>", st["section"]),
+            (branch, st["sub"]),
+            (f"{semester_roman} Semester {exam_session}", st["sub"]),
+        ], total_width_mm=page_width_mm, logo_size_mm=22))
+        story.append(Spacer(1, 3 * mm))
 
     header_block()
 
@@ -512,15 +561,19 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
     st = _styles()
     story = []
     short = _branch_short(branch)
+    page_width_mm = A4[0] / mm - 36  # margins
     for idx, rec in enumerate(records):
         sl_no = rec.get("sl_no") or f"{program_short(program)}/{short}/{batch}/{500 + idx + 1}"
-        story.append(Paragraph(f"SL. NO.: {sl_no}", st["label"]))
-        story.append(Paragraph(_INSTITUTE_LINES[0], st["title"]))
-        story.append(Paragraph(_INSTITUTE_LINES[1], st["sub"]))
-        story.append(Paragraph(_INSTITUTE_LINES[2], st["small"]))
-        story.append(Paragraph(_INSTITUTE_LINES[3], st["small"]))
+        # Top: SL.NO right-aligned
+        story.append(Paragraph(f"<b>SL. NO.: {sl_no}</b>", st["right"]))
+        story.append(_logo_header([
+            (_INSTITUTE_LINES[0], st["title"]),
+            (_INSTITUTE_LINES[1], st["sub"]),
+            (_INSTITUTE_LINES[2], st["small"]),
+            (_INSTITUTE_LINES[3], st["small"]),
+        ], total_width_mm=page_width_mm, logo_size_mm=24))
         story.append(Spacer(1, 3 * mm))
-        story.append(Paragraph("PROVISIONAL GRADE SHEET", st["section"]))
+        story.append(Paragraph("<b>PROVISIONAL GRADE SHEET</b>", st["section"]))
         story.append(Paragraph(program, st["sub"]))
         story.append(Paragraph(branch, st["sub"]))
         story.append(Paragraph(f"{semester_roman} Semester {exam_session}", st["sub"]))
