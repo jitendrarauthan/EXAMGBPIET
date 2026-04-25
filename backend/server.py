@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from processor import (
     apply_back_markers,
+    apply_non_credit_markers,
     generate_gs_pdf,
     generate_tc_pdf,
     parse_gs_pdf,
@@ -404,6 +405,8 @@ async def upload_excel_only(
         gs_records = tc_gs["GS"].get(sem, [])
         a1, _ = apply_back_markers(tc_records, back_map)
         a2, _ = apply_back_markers(gs_records, back_map)
+        apply_non_credit_markers(tc_records)
+        apply_non_credit_markers(gs_records)
         total_back_marks += a1 + a2
 
         tc_out = None

@@ -62,6 +62,20 @@ export default function StudentResults() {
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-12 space-y-10">
+        {/* Legend */}
+        <Card
+          data-testid="legend-card"
+          className="bg-white border border-stone-200 px-6 py-4 rounded-sm shadow-none flex flex-wrap items-center gap-6 text-xs font-mono"
+        >
+          <div className="flex items-center gap-2">
+            <span className="subject-back text-xs">*</span>
+            <span className="text-stone-700">subject cleared after back paper</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 bg-stone-100 border border-stone-200 rounded-sm text-stone-700 font-semibold">$</span>
+            <span className="text-stone-700">non-credit subject</span>
+          </div>
+        </Card>
         {/* Student card */}
         <Card
           data-testid="student-card"

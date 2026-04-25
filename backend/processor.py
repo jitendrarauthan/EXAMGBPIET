@@ -538,14 +538,16 @@ def _parse_gs_page(text: str) -> Optional[dict]:
 
 
 def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str, bool]]) -> Tuple[int, int]:
-    """Mutate records: append ' *' to subject name when SEM excel marks it as back.
+    """Mutate records: append ' *' to subject name when SEM excel marks it as
+    back AND the student has cleared the paper (i.e. grade is not F / Ab /
+    Dt). The '*' therefore means *subject cleared after a back paper*.
 
-    Returns (markers_applied, students_matched) — the latter is the number of
-    students for whom at least one Excel roll was found among the records.
+    Returns (markers_applied, students_matched).
     """
     n = 0
     matched = 0
     record_rolls = {r.get("roll_no", "") for r in records}
+    skip_grades = {"F", "AB", "ABS", "DT"}
     for rec in records:
         roll = rec.get("roll_no", "")
         backs = back_map_for_sem.get(roll, {})
@@ -553,15 +555,20 @@ def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str
             matched += 1
         for s in rec.get("subjects", []):
             code = s["code"].replace(" ", "").upper()
+            grade = (s.get("grade") or "").strip().upper()
             for bcode in backs:
                 if bcode.replace(" ", "").upper() == code:
+                    if grade in skip_grades:
+                        # back marker still recorded for analytics, but no *.
+                        s["back"] = True
+                        s["back_pending"] = True
+                        break
                     s["back"] = True
                     if not s["name"].rstrip().endswith("*"):
                         s["name"] = s["name"].rstrip() + " *"
                     n += 1
                     break
     if back_map_for_sem and matched == 0 and record_rolls:
-        # No roll-overlap between Excel and PDF — surface this for the caller.
         sample_excel = next(iter(back_map_for_sem.keys()))
         sample_pdf = next(iter(record_rolls))
         import logging as _log
@@ -572,6 +579,27 @@ def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str
             len(back_map_for_sem), sample_excel, sample_pdf,
         )
     return n, matched
+
+
+def apply_non_credit_markers(records: List[dict]) -> int:
+    """Append ' $' to subject names whose credits are 0 / blank — these are
+    non-credit subjects (e.g. General Proficiency). Idempotent."""
+    n = 0
+    for rec in records:
+        for s in rec.get("subjects", []):
+            cred = (s.get("credits") or "").strip()
+            try:
+                is_zero = int(cred) == 0
+            except Exception:
+                is_zero = cred in ("", "-", "—", "0")
+            if is_zero:
+                s["non_credit"] = True
+                if "$" not in s["name"]:
+                    s["name"] = s["name"].rstrip(" *") + " $"
+                    if s.get("back") and not s.get("back_pending"):
+                        s["name"] += " *"
+                    n += 1
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -663,23 +691,96 @@ def _styles():
                                    fontSize=11, alignment=1, spaceBefore=4, spaceAfter=4,
                                    leading=13),
         "label": ParagraphStyle("label", parent=s["Normal"], fontName="Helvetica",
-                                 fontSize=9, alignment=0),
+                                 fontSize=7.5, alignment=0, leading=9),
         "right": ParagraphStyle("right", parent=s["Normal"], fontName="Helvetica",
                                  fontSize=9, alignment=2),
         "back_subject": ParagraphStyle("back_subject", parent=s["Normal"],
-                                        fontName="Helvetica-Bold", fontSize=8,
-                                        textColor=colors.HexColor("#92400e"), alignment=0),
+                                        fontName="Helvetica-Bold", fontSize=7,
+                                        textColor=colors.HexColor("#92400e"), alignment=0,
+                                        leading=8.4),
         "subject": ParagraphStyle("subject", parent=s["Normal"], fontName="Helvetica",
-                                    fontSize=8, alignment=0),
+                                    fontSize=7, alignment=0, leading=8.4),
     }
 
 
+def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str):
+    """Per-page header for TC: institute logos + name strip + course/branch/semester.
+
+    Drawn directly on the canvas so it appears on every A3 page.
+    """
+    canv.saveState()
+    page_w, _page_h = doc.pagesize
+    margin = 12 * mm
+    logo_size = 22 * mm
+    top_y = _page_h - 6 * mm  # top edge of logo
+
+    # Logos (left = institute, right = UTU) — silently skip if files missing.
+    if INSTITUTE_LOGO.exists():
+        try:
+            canv.drawImage(
+                str(INSTITUTE_LOGO), margin, top_y - logo_size,
+                width=logo_size, height=logo_size,
+                mask="auto", preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+    if UTU_LOGO.exists():
+        try:
+            canv.drawImage(
+                str(UTU_LOGO), page_w - margin - logo_size, top_y - logo_size,
+                width=logo_size, height=logo_size,
+                mask="auto", preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+
+    # Centered institute text block (4 lines beside logos)
+    cx = page_w / 2
+    canv.setFillColor(colors.black)
+    canv.setFont("Helvetica-Bold", 12)
+    canv.drawCentredString(cx, top_y - 4.5 * mm, _INSTITUTE_LINES[0])
+    canv.setFont("Helvetica", 9.5)
+    canv.drawCentredString(cx, top_y - 9 * mm, _INSTITUTE_LINES[1])
+    canv.setFont("Helvetica", 8.5)
+    canv.drawCentredString(cx, top_y - 13 * mm, _INSTITUTE_LINES[2])
+    canv.drawCentredString(cx, top_y - 16.5 * mm, _INSTITUTE_LINES[3])
+
+    # Course / branch / semester block — sits just below logos, full width.
+    course_y = top_y - logo_size - 5 * mm
+    canv.setFont("Helvetica-Bold", 12.5)
+    canv.drawCentredString(
+        cx, course_y, f"Tabulation Chart for {program_short(program) or program}"
+    )
+    canv.setFont("Helvetica-Bold", 10.5)
+    canv.drawCentredString(cx, course_y - 4.8 * mm, branch or "")
+    canv.setFont("Helvetica", 10)
+    sess_line = f"{sem} Semester"
+    if session:
+        sess_line += f"   |   {session}"
+    canv.drawCentredString(cx, course_y - 9.2 * mm, sess_line)
+
+    # Thin divider beneath header
+    canv.setLineWidth(0.4)
+    canv.setStrokeColor(colors.HexColor("#9ca3af"))
+    canv.line(margin, course_y - 12 * mm, page_w - margin, course_y - 12 * mm)
+    canv.restoreState()
+
+
 def _draw_tc_footer(canv, doc, program: str, branch: str, sem: str, session: str):
-    """Per-page footer for TC: 5-cell signature row + page number."""
+    """Per-page footer for TC: legend line + 5-cell signature row + page metadata."""
     canv.saveState()
     page_w, page_h = doc.pagesize
     margin = 12 * mm
-    y = 14 * mm  # baseline of footer band
+    # ---- Legend (just above signature line) ----
+    legend_y = 22 * mm
+    canv.setFont("Helvetica-Oblique", 7.5)
+    canv.setFillColor(colors.HexColor("#57534e"))
+    canv.drawString(
+        margin, legend_y,
+        "*  subject cleared after back paper          $  non-credit subject",
+    )
+    # ---- Signature row ----
+    y = 14 * mm
     cell_w = (page_w - 2 * margin) / 5.0
     labels = [
         "Prepared by", "Checked by",
@@ -694,12 +795,17 @@ def _draw_tc_footer(canv, doc, program: str, branch: str, sem: str, session: str
     for i, lbl in enumerate(labels):
         x = margin + i * cell_w + cell_w / 2
         canv.drawCentredString(x, y - 6, lbl)
-    # Top-right page metadata
     canv.setFont("Helvetica", 7)
     canv.setFillColor(colors.HexColor("#57534e"))
-    canv.drawRightString(page_w - margin, page_h - 8 * mm,
-                          f"{program} • {branch} • Sem {sem} • {session} • Page {doc.page}")
+    canv.drawRightString(page_w - margin, 6 * mm,
+                          f"Page {doc.page}")
     canv.restoreState()
+
+
+def _draw_tc_page(canv, doc, program: str, branch: str, sem: str, session: str):
+    """Combined per-page chrome: header (top) + footer (bottom)."""
+    _draw_tc_header(canv, doc, program, branch, sem, session)
+    _draw_tc_footer(canv, doc, program, branch, sem, session)
 
 
 def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
@@ -724,39 +830,28 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
     buf = io.BytesIO()
     page = A3
     margin = 12 * mm
-    footer_h = 22 * mm  # space for the per-page signed footer
+    footer_h = 28 * mm  # legend + signature band
+    header_h = 50 * mm  # institute strip + course/branch/semester (drawn on canvas)
     doc = BaseDocTemplate(
         buf, pagesize=page,
         leftMargin=margin, rightMargin=margin,
-        topMargin=10 * mm, bottomMargin=footer_h,
+        topMargin=header_h, bottomMargin=footer_h,
     )
     frame = Frame(
-        margin, footer_h, page[0] - 2 * margin, page[1] - 10 * mm - footer_h,
+        margin, footer_h, page[0] - 2 * margin, page[1] - header_h - footer_h,
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
         showBoundary=0,
     )
     doc.addPageTemplates([PageTemplate(
         id="tc", frames=[frame],
-        onPage=lambda c, d: _draw_tc_footer(c, d, program, branch, semester_roman, exam_session),
+        onPage=lambda c, d: _draw_tc_page(c, d, program, branch, semester_roman, exam_session),
     )])
 
     st = _styles()
     page_width_mm = page[0] / mm - 24
     col_widths = [26 * mm, 95 * mm, 16 * mm, 28 * mm, 28 * mm, 28 * mm, 22 * mm, 26 * mm]
 
-    # --- Page header (institute strip) reused at top of each TC page ---
-    def header_flowable():
-        return _logo_header([
-            (_INSTITUTE_LINES[0], st["title"]),
-            (_INSTITUTE_LINES[1], st["sub"]),
-            (_INSTITUTE_LINES[2], st["small"]),
-            (_INSTITUTE_LINES[3], st["small"]),
-            (f"<b>Tabulation Chart for {program}</b>", st["section"]),
-            (branch, st["sub"]),
-            (f"{semester_roman} Semester {exam_session}", st["sub"]),
-        ], total_width_mm=page_width_mm, logo_size_mm=24)
-
-    story = [header_flowable(), Spacer(1, 3 * mm)]
+    story: list = []
     students_per_page = 4
 
     def build_student_block(rec):
@@ -773,12 +868,12 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
         ]))
         rows = [[
-            "Subject\nCode", "Subject Name", "Credits", "External\nMarks",
-            "Sessional\nMarks", "Total\nMarks", "Grade", "Grade\nPoints",
+            "Subject Code", "Subject Name", "Credits", "Ext.",
+            "Ses.", "Total", "Grade", "GP",
         ]]
         for s in rec.get("subjects", []):
             name_para = Paragraph(s["name"], st["back_subject"] if s.get("back") else st["subject"])
@@ -815,11 +910,15 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("FONTSIZE", (0, 0), (-1, 0), 7),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("ALIGN", (2, 1), (-1, -4), "CENTER"),
-            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("FONTSIZE", (0, 1), (-1, -1), 7),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 0.8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8),
             ("SPAN", (0, -3), (1, -3)),
             ("BACKGROUND", (0, -3), (-1, -3), colors.HexColor("#f5f5f4")),
             ("FONTNAME", (0, -3), (-1, -3), "Helvetica-Bold"),
@@ -835,15 +934,11 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
             ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#fafaf9")),
         ]))
-        return KeepTogether([t_info, t, Spacer(1, 4 * mm)])
+        return KeepTogether([t_info, t, Spacer(1, 1.5 * mm)])
 
     for idx, rec in enumerate(records):
         story.append(build_student_block(rec))
-        # Force page break every N students so each page has at most N blocks.
-        if (idx + 1) % students_per_page == 0 and idx + 1 < len(records):
-            story.append(PageBreak())
-            story.append(header_flowable())
-            story.append(Spacer(1, 3 * mm))
+    # Frame fills students naturally (3-4 per page) via KeepTogether.
 
     doc.build(story)
     return buf.getvalue()
@@ -855,15 +950,14 @@ def generate_tc_pdf(records: List[dict], program: str = "", branch: str = "",
 
 
 def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
-    """Per-page decorations for GS: institute-logo watermark + footer line."""
+    """Per-page decorations for GS: institute-logo watermark only (no footer text)."""
     canv.saveState()
     page_w, page_h = doc.pagesize
-    # Watermark — institute logo big, very low opacity, centered.
     if watermark_path and Path(watermark_path).exists():
         try:
             canv.setFillAlpha(0.07)
-            wmark_w = 110 * mm
-            wmark_h = 110 * mm
+            wmark_w = 130 * mm
+            wmark_h = 130 * mm
             canv.drawImage(
                 watermark_path,
                 (page_w - wmark_w) / 2, (page_h - wmark_h) / 2,
@@ -873,17 +967,6 @@ def _draw_gs_decoration(canv, doc, watermark_path: str = ""):
             canv.setFillAlpha(1)
         except Exception:
             pass
-    # Page-bottom hairline
-    canv.setStrokeColor(colors.HexColor("#9ca3af"))
-    canv.setLineWidth(0.4)
-    canv.line(18 * mm, 18 * mm, page_w - 18 * mm, 18 * mm)
-    canv.setFont("Helvetica-Oblique", 7)
-    canv.setFillColor(colors.HexColor("#57534e"))
-    canv.drawCentredString(
-        page_w / 2, 12 * mm,
-        "Generated electronically by GBPIET Examination Cell • This document carries a verification barcode.",
-    )
-    canv.drawRightString(page_w - 18 * mm, 12 * mm, f"Page {doc.page}")
     canv.restoreState()
 
 
@@ -952,32 +1035,40 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             except Exception:
                 pass
 
-        # ---- Institute + UTU strip — institute name AND university name on a SINGLE line ----
+        # ---- Institute / UTU strip — institute and university each on its own line ----
         single_line_styles = [
             (
-                "<font size='10.5'><b>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY,</b> "
-                "Pauri Garhwal — affiliated to <b>Veer Madho Singh Bhandari Uttarakhand Technical University</b></font>",
+                "<font size='11.5' face='Helvetica-Bold'>GOVIND BALLABH PANT INSTITUTE OF ENGINEERING AND TECHNOLOGY</font>",
                 st["sub"],
             ),
-            ("<font size='8' color='#57534e'>An Autonomous Institute of the Government of Uttarakhand</font>", st["small"]),
+            (
+                "<font size='8.5'>Pauri Garhwal, Uttarakhand &middot; An Autonomous Institute of the Government of Uttarakhand</font>",
+                st["small"],
+            ),
+            (
+                "<font size='9.5' face='Helvetica-Bold'>Affiliated to Veer Madho Singh Bhandari Uttarakhand Technical University</font>",
+                st["sub"],
+            ),
         ]
         story.append(_logo_header(single_line_styles, total_width_mm=page_width_mm, logo_size_mm=22))
         story.append(Spacer(1, 2 * mm))
 
-        # ---- Title band — improved typography ----
+        # ---- Title band — programme / branch / semester+session each on its own line ----
         title_band = Table([[Paragraph(
             "<para alignment='center'>"
             "<font size='15' face='Helvetica-Bold' color='white'>GRADE SHEET</font><br/>"
-            f"<font size='9.5' color='white'>{program}  &nbsp;&nbsp;|&nbsp;&nbsp;  {branch}</font><br/>"
-            f"<font size='9' color='#cbd5e1'>{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font></para>",
+            f"<font size='11' face='Helvetica-Bold' color='white'>{program}</font><br/>"
+            f"<font size='10' color='white'>{branch}</font><br/>"
+            f"<font size='9.5' color='#cbd5e1'>{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
+            "</para>",
             st["sub"],
         )]], colWidths=[page_width_mm * mm])
         title_band.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1e1b4b")),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 9),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ]))
         story.append(title_band)
         story.append(Spacer(1, 3 * mm))
@@ -1054,19 +1145,23 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         story.append(t)
         story.append(Spacer(1, 3 * mm))
 
-        # ---- Semester history table (SGPA / CGPA / Earned Credits / Result) ----
+        # ---- Semester-wise Result — current + previous semesters only ----
         roll = rec.get("roll_no", "")
         per_sem = (all_sem_summary or {}).get(roll, {})
         sem_order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
-        hist_header = ["Semester"] + sem_order
+        try:
+            current_idx = sem_order.index(semester_roman)
+        except ValueError:
+            current_idx = len(sem_order) - 1
+        visible_sems = sem_order[:current_idx + 1]
+        hist_header = ["Semester"] + visible_sems
         sgpa_row = ["SGPA"]
         cgpa_row = ["CGPA"]
         ec_row = ["Earned Cr."]
         res_row = ["Result"]
-        for s in sem_order:
+        for s in visible_sems:
             cell = per_sem.get(s, {})
             if not cell and s == semester_roman:
-                # current sheet already has fresh values
                 cell = {
                     "sgpa": rec.get("sgpa", ""),
                     "cgpa": rec.get("cgpa", ""),
@@ -1077,8 +1172,10 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             cgpa_row.append(cell.get("cgpa") or "—")
             ec_row.append(cell.get("earned_credits") or "—")
             res_row.append((cell.get("result") or "—")[:6])
+        n_cols = len(visible_sems)
+        col_w = (page_width_mm - 24) / max(n_cols, 1)
         history = Table([hist_header, sgpa_row, cgpa_row, ec_row, res_row],
-                          colWidths=[24 * mm] + [(page_width_mm - 24) / 8 * mm] * 8,
+                          colWidths=[24 * mm] + [col_w * mm] * n_cols,
                           repeatRows=1)
         history.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
@@ -1090,12 +1187,12 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]))
         story.append(Paragraph(
-            "<font size='7.5' color='#57534e'><b>Semester-wise Result History</b></font>",
+            "<font size='8.5' color='#57534e'><b>SEMESTER-WISE RESULT</b></font>",
             st["label"],
         ))
         story.append(Spacer(1, 1 * mm))
@@ -1136,7 +1233,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
                 st["label"],
             ))
 
-        story.append(Spacer(1, 4 * mm))
+        story.append(Spacer(1, 14 * mm))
 
         # ---- Signature row at the bottom (Director AFTER Examination Controller) ----
         sig = Table([
@@ -1144,10 +1241,10 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         ], colWidths=[(page_width_mm / 4) * mm] * 4,
             style=TableStyle([
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
                 ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#1c1917")),
-                ("TOPPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 22),
                 ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.HexColor("#9ca3af")),
             ]))
         story.append(KeepTogether([sig]))
