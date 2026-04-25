@@ -1039,8 +1039,8 @@ def _draw_gs_header(canv, doc):
     canv.saveState()
     page_w, page_h = doc.pagesize
     margin = 14 * mm
-    logo_size = 20 * mm
-    top_y = page_h - 4 * mm  # top edge of logo
+    logo_size = 22 * mm
+    top_y = page_h - 8 * mm  # top edge of logo (extra padding from page top)
 
     # Logos
     if INSTITUTE_LOGO.exists():
@@ -1132,7 +1132,7 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
     page = A4
     margin = 14 * mm
     bottom_h = 26 * mm  # leave room for the canvas-drawn signature footer
-    top_h = 30 * mm     # leave room for the canvas-drawn institute header
+    top_h = 38 * mm     # leave generous room for the canvas-drawn institute header
     doc = BaseDocTemplate(
         buf, pagesize=page,
         leftMargin=margin, rightMargin=margin,
@@ -1166,14 +1166,43 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
     hash_map: Dict[str, str] = {}
 
     for idx, rec in enumerate(records):
-        # ---- Verification hash (12 hex chars) — deterministic and unique
-        # per (roll, semester, exam_session). Built from immutable identity
-        # fields so re-uploading the same Excel produces the same code.
-        import hashlib
-        seed = (
-            f"{rec.get('roll_no','')}|{rec.get('enroll_no','')}|"
-            f"{semester_roman}|{exam_session}|{rec.get('name','')}"
+        # ---- Verification hash (12 hex chars) — content-addressed.
+        # Seeds from every visible GS field (subjects, grades, marks, totals,
+        # asterisks via "back" flag, etc.) so that ANY change to the GS — a
+        # newly-applied asterisk, an updated grade or remark — produces a
+        # different hash on the next upload, while an unchanged GS keeps
+        # exactly the same code.
+        import hashlib, json
+        subj_seed = json.dumps(
+            [
+                {
+                    "code": s.get("code", ""),
+                    "name": s.get("name", ""),
+                    "credits": s.get("credits", ""),
+                    "external": s.get("external", ""),
+                    "sessional": s.get("sessional", ""),
+                    "total": s.get("total", ""),
+                    "grade": s.get("grade", ""),
+                    "grade_points": s.get("grade_points", ""),
+                    "back": bool(s.get("back")),
+                    "back_pending": bool(s.get("back_pending")),
+                }
+                for s in rec.get("subjects", [])
+            ],
+            sort_keys=True,
+            ensure_ascii=False,
         )
+        seed = "|".join([
+            rec.get("roll_no", ""), rec.get("enroll_no", ""),
+            rec.get("name", ""), rec.get("father_name", ""),
+            program, branch, batch,
+            semester_roman, exam_session,
+            str(rec.get("sgpa", "")), str(rec.get("cgpa", "")),
+            str(rec.get("earned_credits", "")),
+            str(rec.get("cuml_earned_credits", "")),
+            rec.get("result", ""), rec.get("remark", ""),
+            subj_seed,
+        ])
         verify_hash = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12].upper()
         rec["gs_hash"] = verify_hash
         if rec.get("roll_no"):
