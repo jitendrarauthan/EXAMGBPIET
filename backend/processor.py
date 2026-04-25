@@ -1257,39 +1257,51 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         # every page, so the story starts directly with the GRADE SHEET title
         # band below.
 
+        # Common content width — both header bands AND the tables below use
+        # this exact width so all sections align flush left/right.
+        content_w = 174 * mm
+
         # ---- "GRADE SHEET" header band — its own visual section ----
         title_band = Table([[Paragraph(
-            "<para alignment='center'>"
-            "<font size='17' face='Helvetica-Bold' color='white'>GRADE SHEET</font>"
+            "<para alignment='center' leading='20' spaceBefore='0' spaceAfter='0'>"
+            "<font size='20' face='Helvetica-Bold' color='white'>GRADE SHEET</font>"
             "</para>",
             st["sub"],
-        )]], colWidths=[page_width_mm * mm])
+        )]], colWidths=[content_w])
         title_band.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1e1b4b")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            # Add a touch more top than bottom padding so the optical cap-height
+            # (without descenders) sits visually centered.
+            ("TOPPADDING", (0, 0), (-1, -1), 12),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
         ]))
         story.append(title_band)
         story.append(Spacer(1, 1.5 * mm))
 
-        # ---- Course / branch / semester+session — its own lighter section ----
+        # ---- Course / branch / semester+session — its own section ----
+        # Times-Roman (a refined serif) at larger sizes makes this band feel
+        # academic and clearly distinct from both the Algerian header and the
+        # body Helvetica.
         course_band = Table([[Paragraph(
-            "<para alignment='center'>"
-            f"<font size='11' face='Helvetica-Bold' color='#1c1917'>{program}</font><br/>"
-            f"<font size='10' color='#1c1917'>{branch}</font><br/>"
-            f"<font size='9.5' color='#57534e'>{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
+            "<para alignment='center' leading='17'>"
+            f"<font size='13' face='Times-Bold' color='#1c1917'>{program}</font><br/>"
+            f"<font size='11.5' face='Times-Roman' color='#1c1917'>{branch}</font><br/>"
+            f"<font size='10.5' face='Times-Italic' color='#57534e'>"
+            f"{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
             "</para>",
             st["sub"],
-        )]], colWidths=[page_width_mm * mm])
+        )]], colWidths=[content_w])
         course_band.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f5f5f4")),
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9ca3af")),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ]))
         story.append(course_band)
         story.append(Spacer(1, 3 * mm))
