@@ -897,18 +897,12 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
         ]))
         story.append(t)
 
-        # Ordinance grade reference (compact)
-        story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph(
-            "<font size='8'><b>Grade Reference</b> (per institute ordinance)</font>",
-            st["label"],
-        ))
-        story.append(Spacer(1, 1 * mm))
-        story.append(_grade_reference_block(program))
-
-        story.append(Spacer(1, 10 * mm))
-        # 4-column signature row including Director per latest brief
-        story.append(Table([
+        story.append(Spacer(1, 8 * mm))
+        # 4-column signature row including Director per latest brief.
+        # Wrapped in KeepTogether to ensure ReportLab does not push it onto
+        # the next page when the student's subject list is long.
+        from reportlab.platypus import KeepTogether  # local import to avoid top-level churn
+        sig = Table([
             ["Prepared by", "Checked by", "Director", "Examination Controller"]
         ], colWidths=[44 * mm] * 4,
             style=TableStyle([
@@ -916,9 +910,23 @@ def generate_gs_pdf(records: List[dict], program: str, branch: str, semester_rom
                 ("FONTSIZE", (0, 0), (-1, -1), 9),
                 ("TOPPADDING", (0, 0), (-1, -1), 18),
                 ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.grey),
-            ])))
+            ]))
+        story.append(KeepTogether([sig]))
         if idx + 1 < len(records):
             story.append(PageBreak())
+
+    # Single appendix page at the very end with the ordinance grade reference
+    if records:
+        story.append(PageBreak())
+        story.append(Paragraph("<b>Grade Reference</b>", st["section"]))
+        story.append(Paragraph(
+            "Grade scheme as per institute ordinance / academic council "
+            "minutes. Subjects marked with a trailing * indicate carry-over "
+            "(back) papers per the SEM_X highlighted cells.",
+            st["sub"],
+        ))
+        story.append(Spacer(1, 4 * mm))
+        story.append(_grade_reference_block(program))
 
     doc.build(story)
     return buf.getvalue()
@@ -932,11 +940,22 @@ def _branch_short(branch: str) -> str:
 
 
 def program_short(program: str) -> str:
-    if "Bachelor" in program:
-        return "B. TECH"
-    if "Master of Computer" in program:
+    """Return canonical short label for a programme.
+
+    Accepts long names ('Bachelor of Technology', 'Master of Computer
+    Applications', 'Master of Technology') as well as the short literal forms
+    used by the frontend ('B.Tech', 'M.Tech', 'MCA'). Falls back to 'PROG'.
+    """
+    if not program:
+        return "PROG"
+    norm = re.sub(r"[^A-Z]", "", program.upper())  # strip dots/spaces
+    if "MASTEROFCOMPUTER" in norm or norm == "MCA":
         return "MCA"
-    if "Master" in program:
+    if "MASTEROFTECH" in norm or norm.startswith("MTECH"):
+        return "M. TECH"
+    if "BACHELOR" in norm or norm.startswith("BTECH"):
+        return "B. TECH"
+    if "MASTER" in norm:
         return "M. TECH"
     return "PROG"
 

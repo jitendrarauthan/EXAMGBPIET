@@ -33,7 +33,7 @@ export default function StudentResults() {
             <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
               Govind Ballabh Pant Institute of Engineering &amp; Technology
             </p>
-            <h1 className="font-display text-xl">Provisional Results</h1>
+            <h1 className="font-display text-xl">Results</h1>
           </div>
           <div className="flex gap-2">
             <Button

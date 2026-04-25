@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 5 — both bugs from iteration_4 are FIXED. Backend pytest now 33/33 PASS (was 31/33) on /app/backend/tests/test_portal_api.py, including TestI4GradeReference.test_mtech_grade_table_mtech_reference (M.Tech grade table — 'Outstanding/Excellent/Pass/Absent' present) and TestI4GsPdf.test_gs_no_slno_no_provisional_has_grade_sheet (Director on every sampled student page). Smoke confirmed via direct PDF inspection: B.Tech excel-only upload produces 55-page GS where Director appears on pages 1–54 (54/55) and the appendix (page 55) contains the B.Tech grade reference (D+/E+/P present, 'Outstanding' absent); M.Tech excel-only upload produces 55-page GS where Director appears on pages 1–54 and appendix contains M.Tech ordinance labels (Outstanding/Excellent/Pass/Absent) with NO 'D+'/'E+'. Per-spec student pages 1, 5, 50, last-1 all carry Director on both PDFs. TC PDF still A3 portrait (842x1191pt), totals row populated, 'UTU' enrollment + 'Director' + 'GBPIET' present in signature row. Frontend /student/results heading verified live as exact 'Results' (no 'Provisional Results' anywhere on page).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_portal_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "processor.program_short normalisation (strip dots/spaces, upper-case, then map MTECH/MASTER->M. TECH, BTECH/BACHELOR->B. TECH, MCA->MCA) now correctly drives _grade_table_for_program — verified end-to-end via M.Tech excel-only upload producing M.Tech ordinance grade table.",
+    "GS PDF appendix-page strategy works: grade reference is now rendered ONCE at the end of the GS document on a dedicated final page; per-student pages no longer overflow, and the signature row (Prepared by / Checked by / Director / Examination Controller) wrapped in KeepTogether appears on every student page (54/55 pages have 'Director', last is appendix). This also keeps GS file size predictable.",
+    "Frontend StudentResults.jsx now renders 'Results' heading consistent with PDF title 'GRADE SHEET' (Provisional dropped both places).",
+    "TC PDF unchanged — A3 portrait, totals, enrollment column populated; nothing regressed.",
+    "Suggestion (low priority): TestI4GsPdf.test_gs_no_slno_no_provisional_has_grade_sheet samples up to 3 pages (0, 50, 106). The 55-page actual output triggers only [0, 50] today. Consider expanding sampling to fixed ratios (10%, 50%, 90%, last_student=n-2) for stronger regression coverage now that appendix-page is canonical."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "100%"},
+  "test_credentials": "Admin: admin@gbpiet.ac.in / Admin@2026 (works). Student: 250090170001 (no DOB).",
+  "seed_data_creation": "Reuses /app/samples/aiml.xlsx — uploaded once as B.Tech and once as M.Tech via /api/admin/uploads/excel during smoke run. Tests are idempotent.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 33 backend tests in /app/backend/tests/test_portal_api.py pass in ~100s. Bug fixes verified: program_short() handles canonical short forms; GS layout uses appendix page for grade reference + KeepTogether for signature row. Frontend heading change ('Results') verified on live preview URL via /student → 250090170001 flow. No retest required unless processor.py or StudentResults.jsx change again.",
+  "rca of the issue": "Both iteration_4 bugs resolved. Bug 1 fix: program_short() now normalises input (upper-case, strip dots/spaces) before keyword matching, so 'M.Tech', 'MTech', 'M Tech' all map to 'M. TECH' and feed _grade_table_for_program correctly. Bug 2 fix: generate_gs_pdf moved the grade-reference table to a single appendix page at the end of the GS PDF (instead of inline per student) and wrapped the per-student signature row in ReportLab KeepTogether so ReportLab cannot split it across pages. Verification: B.Tech 55p GS → Director on 54 pages + appendix with D+/E+/P only; M.Tech 55p GS → Director on 54 pages + appendix with Outstanding/Excellent/Pass/Absent only."
+}
