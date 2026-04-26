@@ -247,6 +247,51 @@ def parse_mtech_block_sheet(ws, kind: str) -> List[dict]:
     return out
 
 
+def _scan_label_row(ws, r: int, rec: dict) -> None:
+    """Scan one row for known labels and stash their adjacent values into the
+    student record. Used by the M.Tech block parser where the same logical
+    fields (Result / SGPA / CGPA / Earned Credits / Remark) are placed in
+    different column slots in different sheet layouts."""
+    LABEL_TO_KEY = [
+        ("RESULT", "result"),
+        ("REMARK", "remark"),
+        ("SGPA", "sgpa"),
+        ("CGPA", "cgpa"),
+        ("EARNED CREDIT", "earned_credits"),
+        ("CUML", "cuml_earned_credits"),
+    ]
+    LABELS = [lbl for lbl, _ in LABEL_TO_KEY]
+    max_c = ws.max_column
+
+    def _is_another_label(text: str) -> bool:
+        s = text.strip().upper().rstrip(":").strip()
+        return any(s.startswith(lbl) for lbl in LABELS)
+
+    for c in range(1, max_c + 1):
+        v = ws.cell(r, c).value
+        if v is None:
+            continue
+        s = str(v).strip().upper().rstrip(":").strip()
+        matched = next((k for lbl, k in LABEL_TO_KEY if s.startswith(lbl)), None)
+        if not matched:
+            continue
+        # Look at the next ≤3 cells; pick the first non-empty value, but stop
+        # if we encounter another label (means our value cell is genuinely
+        # blank — e.g., empty Remark).
+        for cc in range(c + 1, min(c + 4, max_c + 1)):
+            nv = ws.cell(r, cc).value
+            if nv is None:
+                continue
+            txt = str(nv).strip()
+            if txt == "":
+                continue
+            if _is_another_label(txt):
+                break
+            if not rec.get(matched):
+                rec[matched] = txt
+            break
+
+
 def _parse_mtech_one_block(ws, r0: int, r1: int, kind: str) -> Optional[dict]:
     """Parse a SINGLE per-student block bounded by [r0, r1) rows."""
     rec: dict = {
@@ -300,14 +345,14 @@ def _parse_mtech_one_block(ws, r0: int, r1: int, kind: str) -> Optional[dict]:
             # Skip — totals row
             continue
         elif c1.lower().startswith("result"):
-            # Marksheets layout: col2=result, col5=remark, col8=sgpa,
-            # col10=cgpa, col12=earned, col14=cuml.
-            rec["result"] = _g(r, 2)
-            rec["remark"] = _g(r, 5)
-            rec["sgpa"] = _g(r, 8)
-            rec["cgpa"] = _g(r, 10)
-            rec["earned_credits"] = _g(r, 12)
-            rec["cuml_earned_credits"] = _g(r, 14)
+            # Find values by scanning labelled cells across this row.
+            # Different M.Tech sheet layouts place the values in different
+            # columns, so we look for each label and pick up the next
+            # non-empty cell to its right.
+            _scan_label_row(ws, r, rec)
+        elif c1.lower().startswith("earned credit"):
+            # GS layout: Earned Credits + SGPA + CGPA share one row.
+            _scan_label_row(ws, r, rec)
         else:
             # Subject line: only consider rows AFTER the header row, with a
             # plausible subject-code in col 1.
@@ -354,6 +399,24 @@ def _parse_mtech_one_block(ws, r0: int, r1: int, kind: str) -> Optional[dict]:
             rec["result"] = "FAIL"
         else:
             rec["result"] = "PASS"
+
+    # Round numeric SGPA / CGPA / Earned-Credit strings to 2 decimals so the
+    # GS / TC don't display the full IEEE-754 expansion (6.6363636363...).
+    for k in ("sgpa", "cgpa"):
+        v = rec.get(k, "")
+        if v:
+            try:
+                rec[k] = f"{float(v):.2f}"
+            except (TypeError, ValueError):
+                pass
+    for k in ("earned_credits", "cuml_earned_credits"):
+        v = rec.get(k, "")
+        if v:
+            try:
+                f = float(v)
+                rec[k] = str(int(f)) if f == int(f) else f"{f:.2f}"
+            except (TypeError, ValueError):
+                pass
 
     return rec if rec.get("roll_no") else None
 
