@@ -44,6 +44,7 @@ from processor import (
     parse_tc_or_gs_named_sheet,
     parse_tc_pdf,
     inspect_workbook_sheets,
+    fix_mtech_non_credit_columns,
 )
 
 # ---------------------------------------------------------------------------
@@ -626,6 +627,13 @@ async def upload_mtech(
     apply_back_markers(gs_records, back_map)
     apply_non_credit_markers(tc_records)
     apply_non_credit_markers(gs_records)
+
+    # 3a. Branch-specific column-shift for non-credit subjects on the TC.
+    # For all M.Tech branches OTHER than Biotechnology, the Marksheets
+    # layout displaces sessional/total marks into the grade column and the
+    # letter grade has to be derived from the grade points.
+    fix_mtech_non_credit_columns(tc_records, branch)
+    fix_mtech_non_credit_columns(gs_records, branch)
 
     # If TC records weren't supplied (or parsing failed), derive them from GS
     # records so the M.Tech flow always produces both TC and GS PDFs.

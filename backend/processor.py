@@ -932,6 +932,63 @@ def apply_non_credit_markers(records: List[dict]) -> int:
     return n
 
 
+def _derive_grade_from_gp(gp_raw) -> str:
+    """Map a numeric grade-point value to the equivalent letter grade.
+
+    Uses GBPIET's standard 10-point credit-base scale:
+    10 → O, 9 → A+, 8 → A, 7 → B+, 6 → B, 5 → C, 4 → D, <4 → F.
+    Empty / non-numeric input returns ''.
+    """
+    if gp_raw in (None, ""):
+        return ""
+    try:
+        gp = float(str(gp_raw).strip())
+    except (TypeError, ValueError):
+        return ""
+    if gp >= 10: return "O"
+    if gp >= 9:  return "A+"
+    if gp >= 8:  return "A"
+    if gp >= 7:  return "B+"
+    if gp >= 6:  return "B"
+    if gp >= 5:  return "C"
+    if gp >= 4:  return "D"
+    return "F"
+
+
+def fix_mtech_non_credit_columns(records: List[dict], branch: str) -> int:
+    """For M.Tech branches OTHER than Biotechnology the Marksheets sheet
+    lays out the non-credit "Technical Writing and Presentation Skill ($)"
+    row with the sessional / total marks in the column my parser maps to
+    "grade", and the letter grade missing entirely.
+
+    Apply a corrective shift only for those branches:
+      • external      → '-'
+      • sessional, total → value found in current grade column (X/Y format)
+      • grade         → derived from grade_points (10=O, 9=A+, 8=A, …)
+
+    Biotechnology keeps the existing layout untouched.
+    """
+    branch_norm = (branch or "").strip().lower()
+    if "biotech" in branch_norm:
+        return 0
+    moved = 0
+    for rec in records:
+        for s in rec.get("subjects", []):
+            if not s.get("non_credit"):
+                continue
+            grade_val = (s.get("grade") or "").strip()
+            # Only shift when the grade column actually carries an "N/N"
+            # marks-like value; if it already holds a real grade letter the
+            # row was parsed correctly and we leave it alone.
+            if "/" in grade_val:
+                s["external"] = "-"
+                s["sessional"] = grade_val
+                s["total"] = grade_val
+                s["grade"] = _derive_grade_from_gp(s.get("grade_points", ""))
+                moved += 1
+    return moved
+
+
 # ---------------------------------------------------------------------------
 # Generate PDF — TC*  (Tabulation Chart with asterisks)
 # ---------------------------------------------------------------------------
