@@ -935,7 +935,7 @@ def apply_non_credit_markers(records: List[dict]) -> int:
 def _derive_grade_from_gp(gp_raw) -> str:
     """Map a numeric grade-point value to the equivalent letter grade.
 
-    Uses GBPIET's standard 10-point credit-base scale:
+    Uses GBPIET's standard 10-point credit-base scale (B.Tech / MCA):
     10 → O, 9 → A+, 8 → A, 7 → B+, 6 → B, 5 → C, 4 → D, <4 → F.
     Empty / non-numeric input returns ''.
     """
@@ -955,6 +955,29 @@ def _derive_grade_from_gp(gp_raw) -> str:
     return "F"
 
 
+def _derive_mtech_grade_from_gp(gp_raw) -> str:
+    """Map a numeric grade-point value to the M.Tech ordinance letter grade.
+
+    GBPIET M.Tech ordinance scale (see Grade Reference table on TC/GS):
+        10 → O, 9 → A+, 8 → A, 7 → B, 6 → C, 5 → P, <5 → F.
+    Note: M.Tech has NO B+ / D / E grades — those B.Tech buckets collapse.
+    Empty / non-numeric input returns ''.
+    """
+    if gp_raw in (None, ""):
+        return ""
+    try:
+        gp = float(str(gp_raw).strip())
+    except (TypeError, ValueError):
+        return ""
+    if gp >= 10: return "O"
+    if gp >= 9:  return "A+"
+    if gp >= 8:  return "A"
+    if gp >= 7:  return "B"
+    if gp >= 6:  return "C"
+    if gp >= 5:  return "P"
+    return "F"
+
+
 def fix_mtech_non_credit_columns(records: List[dict], branch: str) -> int:
     """For M.Tech branches OTHER than Biotechnology the Marksheets sheet
     lays out the non-credit "Technical Writing and Presentation Skill ($)"
@@ -964,7 +987,8 @@ def fix_mtech_non_credit_columns(records: List[dict], branch: str) -> int:
     Apply a corrective shift only for those branches:
       • external      → '-'
       • sessional, total → value found in current grade column (X/Y format)
-      • grade         → derived from grade_points (10=O, 9=A+, 8=A, …)
+      • grade         → derived from grade_points using the M.Tech
+                        ordinance scale (10=O, 9=A+, 8=A, 7=B, 6=C, 5=P)
 
     Biotechnology keeps the existing layout untouched.
     """
@@ -984,7 +1008,7 @@ def fix_mtech_non_credit_columns(records: List[dict], branch: str) -> int:
                 s["external"] = "-"
                 s["sessional"] = grade_val
                 s["total"] = grade_val
-                s["grade"] = _derive_grade_from_gp(s.get("grade_points", ""))
+                s["grade"] = _derive_mtech_grade_from_gp(s.get("grade_points", ""))
                 moved += 1
     return moved
 

@@ -702,6 +702,33 @@ async def upload_mtech(
         r.get("roll_no", ""): r.get("gs_hash", "")
         for r in gs_records if r.get("gs_hash")
     }
+    # Merge TC's per-subject marks (external / sessional / total) into the
+    # chosen records so the Student Portal can render the same marks
+    # breakdown that the TC PDF shows. GS sheets typically carry only the
+    # grade & GP columns, leaving marks blank.
+    if gs_records and tc_records:
+        tc_by_roll = {r.get("roll_no", ""): r for r in tc_records}
+        for rec in chosen:
+            tc_rec = tc_by_roll.get(rec.get("roll_no", ""))
+            if not tc_rec or tc_rec is rec:
+                continue
+            tc_subj = {
+                (s.get("code") or "").replace(" ", "").upper(): s
+                for s in tc_rec.get("subjects", [])
+            }
+            for s in rec.get("subjects", []):
+                key = (s.get("code") or "").replace(" ", "").upper()
+                tcs = tc_subj.get(key)
+                if not tcs:
+                    continue
+                for f in ("external", "sessional", "total"):
+                    if not s.get(f):
+                        s[f] = tcs.get(f, "")
+                if tcs.get("back_pending") and not s.get("back_pending"):
+                    s["back_pending"] = True
+                if tcs.get("back") and not s.get("back"):
+                    s["back"] = True
+
     branch_disp = branch
     for rec in chosen:
         roll = rec.get("roll_no")
@@ -720,6 +747,13 @@ async def upload_mtech(
             }},
             upsert=True,
         )
+        # Cumulative earned credits — copy from TC if GS row didn't carry it.
+        cuml = rec.get("cuml_earned_credits") or ""
+        if not cuml and tc_records:
+            for tr in tc_records:
+                if tr.get("roll_no") == roll:
+                    cuml = tr.get("cuml_earned_credits") or ""
+                    break
         await db.results.update_one(
             {"roll_no": roll, "semester": sem},
             {"$set": {
@@ -735,6 +769,7 @@ async def upload_mtech(
                 "result": rec.get("result", ""),
                 "remark": rec.get("remark", ""),
                 "earned_credits": rec.get("earned_credits", ""),
+                "cuml_earned_credits": cuml,
                 "gs_hash": rec.get("gs_hash") or hash_by_roll.get(roll, ""),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }},
