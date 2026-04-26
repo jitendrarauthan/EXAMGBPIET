@@ -957,13 +957,17 @@ def apply_non_credit_markers(records: List[dict], branch: str = "") -> int:
     """Append ' $' to subject names whose credits are 0 / blank — these are
     non-credit subjects (e.g. General Proficiency). Idempotent.
 
-    By default, non-credit subjects don't carry an external (theory) exam,
-    so external is forced to '-'. EXCEPTION: M.Tech Biotechnology's
-    "English for Research Writing ($)" actually has an external exam — for
-    this specific subject we keep whatever external marks the Excel
-    supplied.
+    External marks policy:
+      - If the source Excel supplied a real ``a/b`` external value, KEEP it.
+        Many non-credit subjects (Environmental Studies, Constitution of
+        India, Cyber Security, Python Programming, English Language Lab,
+        Innovations and Problem Solving, Essence of Indian Traditional
+        Knowledge, etc.) DO have an external/theory component.
+      - Only when external is genuinely missing/blank do we substitute '-'
+        so the printed TC has a clean placeholder (e.g. General
+        Proficiency).
     """
-    is_biotech = "biotech" in (branch or "").strip().lower()
+    pat_marks = re.compile(r"^\s*\d+\s*/\s*\d+\s*$")
     n = 0
     for rec in records:
         for s in rec.get("subjects", []):
@@ -979,18 +983,10 @@ def apply_non_credit_markers(records: List[dict], branch: str = "") -> int:
                     if s.get("back") and not s.get("back_pending"):
                         s["name"] += " *"
                     n += 1
-                # Non-credit subjects don't carry an external (theory) exam —
-                # only sessional / total / grade are awarded. The Excel may
-                # still hold an "external" placeholder; replace it with a
-                # dash so the printed TC reflects institute policy.
-                # Biotechnology exception: "English for Research Writing"
-                # does carry an external exam — keep original Excel value.
-                name_norm = (s.get("name") or "").lower()
-                keep_external = (
-                    is_biotech
-                    and "english for research writing" in name_norm
-                )
-                if not keep_external:
+                # Preserve external if Excel provided real ``a/b`` marks;
+                # otherwise standardize the placeholder to a single dash.
+                ext_raw = (s.get("external") or "").strip()
+                if not pat_marks.match(ext_raw):
                     s["external"] = "-"
     return n
 
