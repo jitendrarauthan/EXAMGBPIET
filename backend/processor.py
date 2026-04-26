@@ -70,33 +70,82 @@ def parse_sem_excel(file_bytes: bytes) -> Dict[str, Dict[str, Dict[str, bool]]]:
             continue
         sem = m.group(1).upper()
         ws = wb[sname]
-        # Build subject_code -> list of column indices (1-based) it spans
-        subj_cols: List[Tuple[str, List[int]]] = []
-        last_code: Optional[str] = None
-        for c in range(6, ws.max_column + 1):
-            v = ws.cell(1, c).value
-            if v and str(v).strip():
-                code = str(v).strip()
-                subj_cols.append((code, [c]))
-                last_code = code
-            else:
-                if subj_cols and last_code:
-                    subj_cols[-1][1].append(c)
-        sem_map: Dict[str, Dict[str, bool]] = {}
-        for r in range(6, ws.max_row + 1):
-            roll = ws.cell(r, 2).value
-            if not roll:
-                continue
-            roll = str(roll).strip()
-            student_back: Dict[str, bool] = {}
-            for code, cols in subj_cols:
-                back = any(_is_highlighted(ws.cell(r, c)) for c in cols)
-                if back:
-                    student_back[code] = True
-            if student_back:
-                sem_map[roll] = student_back
-        out[sem] = sem_map
+        out[sem] = _parse_back_map_from_ws(ws)
     return out
+
+
+def _parse_back_map_from_ws(ws) -> Dict[str, Dict[str, bool]]:
+    """Shared worksheet → {roll: {subject_code: True}} parser used by both
+    the standard ``SEM_<sem>`` and the M.Tech ``SEM_<branch>`` workflows."""
+    subj_cols: List[Tuple[str, List[int]]] = []
+    last_code: Optional[str] = None
+    for c in range(6, ws.max_column + 1):
+        v = ws.cell(1, c).value
+        if v and str(v).strip():
+            code = str(v).strip()
+            subj_cols.append((code, [c]))
+            last_code = code
+        else:
+            if subj_cols and last_code:
+                subj_cols[-1][1].append(c)
+    sem_map: Dict[str, Dict[str, bool]] = {}
+    for r in range(6, ws.max_row + 1):
+        roll = ws.cell(r, 2).value
+        if not roll:
+            continue
+        roll = str(roll).strip()
+        student_back: Dict[str, bool] = {}
+        for code, cols in subj_cols:
+            back = any(_is_highlighted(ws.cell(r, c)) for c in cols)
+            if back:
+                student_back[code] = True
+        if student_back:
+            sem_map[roll] = student_back
+    return sem_map
+
+
+def inspect_workbook_sheets(file_bytes: bytes) -> Dict[str, list]:
+    """Return classification of an uploaded workbook's sheets — used by the
+    M.Tech upload UI so the admin can pick which SEM_<branch>, TC_<branch>
+    and GS_<branch> sheets to use.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    out = {"sem": [], "tc": [], "gs": [], "all": list(wb.sheetnames)}
+    for sname in wb.sheetnames:
+        s = sname.strip()
+        if re.match(r"^SEM[_ ]", s, re.I):
+            out["sem"].append(s)
+        elif re.match(r"^TC[_ ]", s, re.I):
+            out["tc"].append(s)
+        elif re.match(r"^GS[_ ]", s, re.I):
+            out["gs"].append(s)
+    return out
+
+
+def parse_sem_excel_sheet(file_bytes: bytes, sheet_name: str) -> Dict[str, bool]:
+    """Parse a SINGLE named SEM_<X> sheet into a {roll: {subject: True}} back
+    paper map (the M.Tech workflow uses ``SEM_<branch>`` sheet names where
+    ``<branch>`` is e.g. CSE / Production / Thermal / ECE / BT etc.).
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
+    return _parse_back_map_from_ws(wb[sheet_name])
+
+
+def parse_tc_or_gs_named_sheet(file_bytes: bytes, sheet_name: str, kind: str) -> List[dict]:
+    """Parse a NAMED ``TC_*`` / ``GS_*`` sheet (e.g. ``TC_CSE`` for the
+    M.Tech workflow) into per-student records using the same column logic as
+    the standard parsers."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
+    ws = wb[sheet_name]
+    if kind.lower() == "tc":
+        return parse_tc_excel_sheet(ws)
+    if kind.lower() == "gs":
+        return parse_gs_excel_sheet(ws)
+    raise ValueError(f"Unknown sheet kind: {kind}")
 
 
 # ---------------------------------------------------------------------------
@@ -766,12 +815,13 @@ def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str
     canv.drawCentredString(
         cx, course_y, f"Tabulation Chart for {program_full(program)}"
     )
+    branch_disp = branch_full(branch)
     # For MCA, branch == programme name (single branch) — skip the duplicate
     # branch line so the course name doesn't appear twice on the TC.
-    show_branch = bool(branch) and program_short(program) != "MCA"
+    show_branch = bool(branch_disp) and program_short(program) != "MCA"
     if show_branch:
         canv.setFont("Helvetica-Bold", 12)
-        canv.drawCentredString(cx, course_y - 5.5 * mm, branch)
+        canv.drawCentredString(cx, course_y - 5.5 * mm, branch_disp)
         sess_y_offset = 10.5 * mm
     else:
         sess_y_offset = 6 * mm
@@ -1184,12 +1234,20 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
 
     st = _styles()
     page_width_mm = page[0] / mm - 2 * (margin / mm)
-    story = []
+    story: list = []
 
     # Map of {roll_no: gs_hash} so the caller can persist verification codes.
     hash_map: Dict[str, str] = {}
 
+    # KeepInFrame wraps every student's GS into a single-page block; if the
+    # combined content overflows, ReportLab shrinks fonts/spacing
+    # proportionally so the entire GS still fits on ONE A4 page.
+    from reportlab.platypus import KeepInFrame
+    frame_w = page[0] - 2 * margin
+    frame_h = page[1] - top_h - bottom_h
+
     for idx, rec in enumerate(records):
+        _start = len(story)  # remember where this student's flowables begin
         # ---- Verification hash (12 hex chars) — content-addressed.
         # Seeds from every visible GS field (subjects, grades, marks, totals,
         # asterisks via "back" flag, etc.) so that ANY change to the GS — a
@@ -1292,13 +1350,14 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         # line whenever the programme is MCA (the branch field on those records
         # mirrors the programme label).
         course_full = program_full(program)
-        show_branch = bool(branch) and program_short(program) != "MCA"
+        branch_disp = branch_full(branch)
+        show_branch = bool(branch_disp) and program_short(program) != "MCA"
         course_html = (
             f"<font size='13' face='Times-Bold' color='#1c1917'>{course_full}</font><br/>"
         )
         if show_branch:
             course_html += (
-                f"<font size='11.5' face='Times-Roman' color='#1c1917'>{branch}</font><br/>"
+                f"<font size='11.5' face='Times-Roman' color='#1c1917'>{branch_disp}</font><br/>"
             )
         course_html += (
             f"<font size='10.5' face='Times-Italic' color='#57534e'>"
@@ -1504,9 +1563,9 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         # proper line spacing regardless of the parent style's leading.
         def _stat_cell(label, value):
             return Paragraph(
-                "<para alignment='center' leading='18' spaceBefore='0' spaceAfter='0'>"
-                f"<font size='7.5' color='#57534e'>{label}</font><br/>"
-                f"<font size='14' face='Helvetica-Bold'>{value}</font>"
+                "<para alignment='center' leading='14' spaceBefore='0' spaceAfter='0'>"
+                f"<font size='7' color='#57534e'>{label}</font><br/>"
+                f"<font size='10' face='Helvetica-Bold'>{value}</font>"
                 "</para>",
                 st["label"],
             )
@@ -1523,8 +1582,8 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafaf9")),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(summary_top)
         if remark_val:
@@ -1537,6 +1596,16 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
 
         # Signature row is rendered as a per-page canvas footer
         # (`_draw_gs_signature_footer`), so we do NOT add it to the story.
+
+        # ---- Single-page guarantee: wrap this student's flowables in a
+        # KeepInFrame so they always fit one A4 page (auto-shrink on overflow).
+        student_block = story[_start:]
+        del story[_start:]
+        story.append(KeepInFrame(
+            frame_w, frame_h, student_block, mode="shrink",
+            mergeSpace=1,
+        ))
+
         if idx + 1 < len(records):
             story.append(PageBreak())
 
@@ -1594,6 +1663,61 @@ def program_full(program: str) -> str:
 def is_short_program(program: str) -> bool:
     """True when the programme has only 4 semesters (MCA, M.Tech)."""
     return program_short(program) in ("MCA", "M. TECH")
+
+
+# Common abbreviations seen in branch names that the institute prefers to
+# always print in expanded form on official transcripts.
+_BRANCH_ABBR_EXPANSIONS: List[Tuple[str, str]] = [
+    ("AIML", "Artificial Intelligence and Machine Learning"),
+    ("AI/ML", "Artificial Intelligence and Machine Learning"),
+    ("AI ML", "Artificial Intelligence and Machine Learning"),
+    ("AI&ML", "Artificial Intelligence and Machine Learning"),
+    ("CSE", "Computer Science & Engineering"),
+    ("ECE", "Electronics and Communication Engineering"),
+    ("EEE", "Electrical and Electronics Engineering"),
+    ("EE", "Electrical Engineering"),
+    ("ME", "Mechanical Engineering"),
+    ("CE", "Civil Engineering"),
+    ("IT", "Information Technology"),
+    ("BT", "Biotechnology"),
+    ("CHE", "Chemical Engineering"),
+    ("PROD", "Production Engineering"),
+    ("THERMAL", "Thermal Engineering"),
+    ("POWER SYSTEM", "Power System"),
+    ("POWERSYSTEM", "Power System"),
+    ("GEOTECHNOLOGY", "Geotechnology"),
+    ("GEO TECH", "Geotechnology"),
+]
+
+
+def branch_full(branch: str) -> str:
+    """Return the branch name with common short forms expanded.
+
+    Operates on whole-word, case-insensitive boundaries. If a parenthesised
+    short form is found (e.g. ``Computer Science & Engineering (AIML)``), only
+    the parenthetical content is expanded so the existing prefix stays
+    untouched.
+    """
+    if not branch:
+        return ""
+    out = branch
+    # First expand parenthesised short forms: '(AIML)' → '(Artificial...)'
+    def _expand_paren(m: "re.Match") -> str:
+        inside = m.group(1).strip()
+        for short, full in _BRANCH_ABBR_EXPANSIONS:
+            if inside.upper() == short.upper():
+                return f"({full})"
+        return m.group(0)
+    out = re.sub(r"\(([^()]+)\)", _expand_paren, out)
+    # Then expand whole-word abbreviations elsewhere in the string.
+    for short, full in _BRANCH_ABBR_EXPANSIONS:
+        # Only expand if the short form appears as a whole word AND the full
+        # form is not already present nearby (avoid replacing 'CSE' inside
+        # 'Computer Science & Engineering').
+        pattern = re.compile(rf"\b{re.escape(short)}\b", re.IGNORECASE)
+        if pattern.search(out) and full.lower() not in out.lower():
+            out = pattern.sub(full, out, count=1)
+    return out
 
 
 # ---------------------------------------------------------------------------

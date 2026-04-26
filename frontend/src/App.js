@@ -8,6 +8,7 @@ import AdminLogin from "@/pages/AdminLogin";
 import AdminLayout from "@/pages/AdminLayout";
 import AdminOverview from "@/pages/AdminOverview";
 import AdminUpload from "@/pages/AdminUpload";
+import AdminUploadMTech from "@/pages/AdminUploadMTech";
 import AdminFiles from "@/pages/AdminFiles";
 import AdminStudents from "@/pages/AdminStudents";
 import StudentLogin from "@/pages/StudentLogin";
@@ -24,6 +25,7 @@ function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminOverview />} />
             <Route path="upload" element={<AdminUpload />} />
+            <Route path="upload-mtech" element={<AdminUploadMTech />} />
             <Route path="files" element={<AdminFiles />} />
             <Route path="students" element={<AdminStudents />} />
           </Route>

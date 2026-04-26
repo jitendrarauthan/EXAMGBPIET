@@ -13,6 +13,7 @@ import {
 const NAV = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/admin/upload", label: "Upload", icon: Upload },
+  { to: "/admin/upload-mtech", label: "Upload (M.Tech)", icon: Upload },
   { to: "/admin/files", label: "Generated Files", icon: FilePlus2 },
   { to: "/admin/students", label: "Students", icon: Users },
 ];

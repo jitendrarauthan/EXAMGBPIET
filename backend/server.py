@@ -39,8 +39,11 @@ from processor import (
     generate_tc_pdf,
     parse_gs_pdf,
     parse_sem_excel,
+    parse_sem_excel_sheet,
     parse_tc_gs_excel,
+    parse_tc_or_gs_named_sheet,
     parse_tc_pdf,
+    inspect_workbook_sheets,
 )
 
 # ---------------------------------------------------------------------------
@@ -534,6 +537,218 @@ async def upload_excel_only(
     }
 
 
+# ---------------------------------------------------------------------------
+# M.Tech-specific upload — branch-keyed sheets
+# ---------------------------------------------------------------------------
+@api.post("/admin/uploads/mtech/inspect")
+async def mtech_inspect(
+    excel: UploadFile = File(...),
+    user: dict = Depends(get_current_admin),
+):
+    """Quick endpoint used by the M.Tech upload UI: returns the list of
+    sheet names found in the uploaded workbook so the admin can pick which
+    SEM_<branch>, TC_<branch> and GS_<branch> tabs to use for the run."""
+    raw = await excel.read()
+    info = inspect_workbook_sheets(raw)
+    return info
+
+
+@api.post("/admin/uploads/mtech")
+async def upload_mtech(
+    program: str = Form("Master of Technology"),
+    branch: str = Form(...),
+    batch: str = Form(...),
+    semester: str = Form(...),
+    exam_session: str = Form(...),
+    sem_sheet: str = Form(...),
+    tc_sheet: str = Form(""),
+    gs_sheet: str = Form(""),
+    excel: UploadFile = File(...),
+    tc_pdf: Optional[UploadFile] = File(None),
+    gs_pdf: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_admin),
+):
+    """M.Tech upload pipeline.
+
+    Inputs:
+      * **excel**       – workbook with branch-named sheets
+      * **sem_sheet**   – name of the ``SEM_<branch>`` sheet to use as the
+                          back-paper map for the chosen semester
+      * **tc_sheet** / **gs_sheet** (optional) – named ``TC_*`` / ``GS_*``
+                          sheets in the same workbook to use as data source
+      * **tc_pdf** / **gs_pdf** (optional) – fall back to PDFs when the data
+                          isn't available as Excel sheets
+
+    Generates the regenerated TC + GS PDFs for the *chosen branch only* and
+    persists per-student results with verification hashes.
+    """
+    sem = semester.strip().upper()
+    raw_excel = await excel.read()
+    tc_pdf_bytes = await tc_pdf.read() if tc_pdf else b""
+    gs_pdf_bytes = await gs_pdf.read() if gs_pdf else b""
+
+    upload_id = str(uuid.uuid4())
+    folder = STORAGE / upload_id
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "input.xlsx").write_bytes(raw_excel)
+    if tc_pdf_bytes:
+        (folder / "tc_input.pdf").write_bytes(tc_pdf_bytes)
+    if gs_pdf_bytes:
+        (folder / "gs_input.pdf").write_bytes(gs_pdf_bytes)
+
+    # 1. Back-paper map for this branch (from the chosen SEM_<branch> sheet)
+    back_map = parse_sem_excel_sheet(raw_excel, sem_sheet)
+
+    # 2. Source records — prefer a TC/GS sheet inside the workbook; fall back
+    # to the uploaded PDFs if no sheet was specified.
+    if tc_sheet:
+        tc_records = parse_tc_or_gs_named_sheet(raw_excel, tc_sheet, "tc")
+    elif tc_pdf_bytes:
+        tc_records = parse_tc_pdf(tc_pdf_bytes)
+    else:
+        tc_records = []
+    if gs_sheet:
+        gs_records = parse_tc_or_gs_named_sheet(raw_excel, gs_sheet, "gs")
+    elif gs_pdf_bytes:
+        gs_records = parse_gs_pdf(gs_pdf_bytes)
+    else:
+        gs_records = []
+
+    if not tc_records and not gs_records:
+        raise HTTPException(400, "No TC or GS data found — provide either a "
+                                  "tc_sheet/gs_sheet inside the Excel or a "
+                                  "tc_pdf/gs_pdf PDF.")
+
+    # 3. Apply back markers + non-credit markers
+    apply_back_markers(tc_records, back_map)
+    apply_back_markers(gs_records, back_map)
+    apply_non_credit_markers(tc_records)
+    apply_non_credit_markers(gs_records)
+
+    # 4. Generate fresh TC + GS PDFs for this branch
+    out_files = {}
+    if tc_records:
+        try:
+            prog = (tc_records[0].get("program") or program)
+            br = (tc_records[0].get("branch") or branch)
+            sem_roman = (tc_records[0].get("semester") or sem)
+            tc_bytes = generate_tc_pdf(tc_records, prog, br, sem_roman, exam_session)
+            (folder / f"TC_{sem}.pdf").write_bytes(tc_bytes)
+            out_files["tc"] = f"TC_{sem}.pdf"
+        except Exception as e:
+            log.exception("TC generation failed: %s", e)
+    if gs_records:
+        try:
+            prog = (gs_records[0].get("program") or program)
+            br = (gs_records[0].get("branch") or branch)
+            sem_roman = (gs_records[0].get("semester") or sem)
+            # Build a per-roll all_sem_summary so the GS shows the complete
+            # I-IV history for M.Tech students.
+            existing = await db.results.find(
+                {"roll_no": {"$in": [r.get("roll_no") for r in gs_records]}},
+                {"_id": 0},
+            ).to_list(2000)
+            all_sem: dict = {}
+            for r in existing:
+                all_sem.setdefault(r.get("roll_no", ""), {})[r.get("semester", "")] = {
+                    "sgpa": r.get("sgpa", ""),
+                    "cgpa": r.get("cgpa", ""),
+                    "earned_credits": r.get("earned_credits", ""),
+                    "result": r.get("result", ""),
+                }
+            for r in gs_records:
+                all_sem.setdefault(r.get("roll_no", ""), {})[sem_roman] = {
+                    "sgpa": r.get("sgpa", ""),
+                    "cgpa": r.get("cgpa", ""),
+                    "earned_credits": r.get("earned_credits", ""),
+                    "result": r.get("result", ""),
+                }
+            gs_bytes = generate_gs_pdf(
+                gs_records, prog, br, sem_roman, exam_session, batch,
+                all_sem_summary=all_sem,
+            )
+            (folder / f"GS_{sem}.pdf").write_bytes(gs_bytes)
+            out_files["gs"] = f"GS_{sem}.pdf"
+        except Exception as e:
+            log.exception("GS generation failed: %s", e)
+
+    # 5. Persist students & results (with gs_hash)
+    chosen = gs_records or tc_records
+    hash_by_roll = {
+        r.get("roll_no", ""): r.get("gs_hash", "")
+        for r in gs_records if r.get("gs_hash")
+    }
+    branch_disp = branch
+    for rec in chosen:
+        roll = rec.get("roll_no")
+        if not roll:
+            continue
+        await db.students.update_one(
+            {"roll_no": roll},
+            {"$set": {
+                "roll_no": roll,
+                "name": rec.get("name", ""),
+                "father_name": rec.get("father_name", ""),
+                "enroll_no": rec.get("enroll_no", ""),
+                "program": program,
+                "branch": branch_disp,
+                "batch": batch,
+            }},
+            upsert=True,
+        )
+        await db.results.update_one(
+            {"roll_no": roll, "semester": sem},
+            {"$set": {
+                "roll_no": roll,
+                "semester": sem,
+                "program": program,
+                "branch": branch_disp,
+                "batch": batch,
+                "exam_session": exam_session,
+                "subjects": rec.get("subjects", []),
+                "sgpa": rec.get("sgpa", ""),
+                "cgpa": rec.get("cgpa", ""),
+                "result": rec.get("result", ""),
+                "remark": rec.get("remark", ""),
+                "earned_credits": rec.get("earned_credits", ""),
+                "gs_hash": rec.get("gs_hash") or hash_by_roll.get(roll, ""),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+
+    # 6. Upload doc bookkeeping
+    upload_doc = {
+        "id": upload_id,
+        "program": program,
+        "branch": branch_disp,
+        "batch": batch,
+        "semester": sem,
+        "exam_session": exam_session,
+        "tc_count": len(tc_records),
+        "gs_count": len(gs_records),
+        "tc_file": out_files.get("tc"),
+        "gs_file": out_files.get("gs"),
+        "source": "mtech",
+        "sem_sheet": sem_sheet,
+        "tc_sheet": tc_sheet,
+        "gs_sheet": gs_sheet,
+        "students_indexed": len(chosen),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["email"],
+    }
+    await db.uploads.insert_one(dict(upload_doc))
+
+    return {
+        "upload_id": upload_id,
+        "branch": branch_disp,
+        "semester": sem,
+        "tc_url": f"/api/admin/files/{upload_id}/tc" if out_files.get("tc") else None,
+        "gs_url": f"/api/admin/files/{upload_id}/gs" if out_files.get("gs") else None,
+        "students_indexed": len(chosen),
+    }
+
+
 @api.get("/admin/files/{upload_id}/sem/{semester}/{kind}")
 async def download_sem_file(upload_id: str, semester: str, kind: str,
                               user: dict = Depends(get_current_admin)):
@@ -572,12 +787,14 @@ async def delete_upload(upload_id: str, user: dict = Depends(get_current_admin))
 @api.get("/admin/files/{upload_id}/{kind}")
 async def download_file(upload_id: str, kind: str, user: dict = Depends(get_current_admin)):
     folder = STORAGE / upload_id
-    fname = "TC_starred.pdf" if kind == "tc" else "GS_starred.pdf"
-    fp = folder / fname
-    if not fp.exists():
+    prefix = "TC" if kind == "tc" else "GS"
+    # Look for the canonical name first, then any per-semester variant.
+    candidates = [folder / f"{prefix}_starred.pdf"] + sorted(folder.glob(f"{prefix}_*.pdf"))
+    fp = next((p for p in candidates if p.exists()), None)
+    if not fp:
         raise HTTPException(404, "Not found")
     return StreamingResponse(open(fp, "rb"), media_type="application/pdf",
-                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+                              headers={"Content-Disposition": f'attachment; filename="{fp.name}"'})
 
 
 # Per-student GS download (single student PDF) -----------------------------
