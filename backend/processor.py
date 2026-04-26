@@ -381,15 +381,18 @@ def _parse_mtech_one_block(ws, r0: int, r1: int, kind: str) -> Optional[dict]:
                     total = ""
                 if not name:
                     continue
+                # Treat Excel error placeholders (#N/A, #VALUE! etc.) as empty.
+                def _clean(x: str) -> str:
+                    return "" if x.startswith("#") else x
                 rec["subjects"].append({
                     "code": code,
                     "name": name,
-                    "credits": credits,
-                    "external": external,
-                    "sessional": sessional,
-                    "total": total,
-                    "grade": grade,
-                    "grade_points": gp,
+                    "credits": _clean(credits),
+                    "external": _clean(external),
+                    "sessional": _clean(sessional),
+                    "total": _clean(total),
+                    "grade": _clean(grade),
+                    "grade_points": _clean(gp),
                 })
 
     # Default ``result`` if missing — derive from grades.
@@ -921,6 +924,11 @@ def apply_non_credit_markers(records: List[dict]) -> int:
                     if s.get("back") and not s.get("back_pending"):
                         s["name"] += " *"
                     n += 1
+                # Non-credit subjects don't carry an external (theory) exam —
+                # only sessional / total / grade are awarded. The Excel may
+                # still hold an "external" placeholder; replace it with a
+                # dash so the printed TC reflects institute policy.
+                s["external"] = "-"
     return n
 
 
