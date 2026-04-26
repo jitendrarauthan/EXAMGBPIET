@@ -100,12 +100,12 @@ export default function AdminUploadMTech() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSheets(data);
-      // auto-pick if there's only one
-      if (data.sem?.length === 1) setSemSheet(data.sem[0]);
-      if (data.tc?.length === 1) setTcSheet(data.tc[0]);
-      if (data.gs?.length === 1) setGsSheet(data.gs[0]);
+      // Reset previous picks so the admin can choose freshly for this workbook.
+      setSemSheet("");
+      setTcSheet("");
+      setGsSheet("");
       toast.success(
-        `Found ${data.sem.length} SEM_, ${data.tc.length} TC_, ${data.gs.length} GS_ sheets`,
+        `Found ${data.all.length} sheet${data.all.length === 1 ? "" : "s"} — pick which one to use as SEM, TC and GS below.`,
       );
     } catch (err) {
       toast.error(fmtError(err));
@@ -220,33 +220,51 @@ export default function AdminUploadMTech() {
               <p className="text-xs uppercase tracking-[0.15em] text-stone-500 font-semibold">
                 Step 2 — Pick the source sheets for this branch
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <p className="text-xs text-stone-500 leading-relaxed">
+                Found <span className="font-mono">{sheets.all.length}</span>{" "}
+                sheets in the workbook. Map any of them to the SEM (back paper
+                map), TC and GS roles below.
+              </p>
+              <details className="text-xs text-stone-500 font-mono mt-1">
+                <summary className="cursor-pointer hover:text-stone-700">
+                  Show all detected sheets
+                </summary>
+                <ul className="mt-2 ml-4 list-disc space-y-0.5">
+                  {sheets.all.map((s) => (
+                    <li key={s} data-testid={`mtech-sheet-${s}`}>
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                 <SheetPicker
-                  label="SEM_ sheet (back papers)"
-                  options={sheets.sem}
+                  label="SEM sheet (back-paper highlights)"
+                  options={sheets.all}
                   value={semSheet}
                   onChange={setSemSheet}
                   testid="mtech-sem-sheet"
                   required
                 />
                 <SheetPicker
-                  label="TC_ sheet (optional)"
-                  options={sheets.tc}
+                  label="TC sheet (Tabulation Chart data)"
+                  options={sheets.all}
                   value={tcSheet}
                   onChange={setTcSheet}
                   testid="mtech-tc-sheet"
                 />
                 <SheetPicker
-                  label="GS_ sheet (optional)"
-                  options={sheets.gs}
+                  label="GS sheet (Grade Sheet data)"
+                  options={sheets.all}
                   value={gsSheet}
                   onChange={setGsSheet}
                   testid="mtech-gs-sheet"
                 />
               </div>
               <p className="text-xs text-stone-500 leading-relaxed">
-                You can use a TC_ / GS_ sheet from the workbook OR upload a
-                separate PDF in step 3 below.
+                You can use a TC / GS sheet from the workbook OR upload a
+                separate PDF in step 3 below — pick whichever option matches
+                the data you have.
               </p>
             </div>
           )}
