@@ -77,6 +77,7 @@ export default function AdminUploadMTech() {
   const [batch, setBatch] = useState("");
   const [semester, setSemester] = useState("I");
   const [examSession, setExamSession] = useState("December 2024");
+  const [studentLimit, setStudentLimit] = useState("");
 
   // sheet-name picks
   const [semSheet, setSemSheet] = useState("");
@@ -138,6 +139,7 @@ export default function AdminUploadMTech() {
       fd.append("sem_sheet", semSheet);
       fd.append("tc_sheet", tcSheet || "");
       fd.append("gs_sheet", gsSheet || "");
+      fd.append("student_limit", studentLimit ? String(parseInt(studentLimit, 10) || 0) : "0");
       fd.append("excel", excel);
       if (tcPdf) fd.append("tc_pdf", tcPdf);
       if (gsPdf) fd.append("gs_pdf", gsPdf);
@@ -343,6 +345,21 @@ export default function AdminUploadMTech() {
                   data-testid="mtech-session-input"
                   className="rounded-sm"
                 />
+              </Field>
+              <Field label="Number of students to generate">
+                <Input
+                  type="number"
+                  min="0"
+                  value={studentLimit}
+                  onChange={(e) => setStudentLimit(e.target.value)}
+                  placeholder="Leave blank for all"
+                  data-testid="mtech-student-limit"
+                  className="rounded-sm"
+                />
+                <p className="text-[11px] text-stone-500 mt-1">
+                  Limits how many students are rendered into TC &amp; GS PDFs
+                  (useful for quick previews on a subset).
+                </p>
               </Field>
             </div>
           </div>

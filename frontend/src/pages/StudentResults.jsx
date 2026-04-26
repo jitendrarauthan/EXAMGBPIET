@@ -182,6 +182,12 @@ export default function StudentResults() {
             </div>
             <div>
               <p className="text-xs text-stone-500 uppercase tracking-[0.15em]">
+                Course
+              </p>
+              <p className="mt-1">{student.program || "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-500 uppercase tracking-[0.15em]">
                 Branch
               </p>
               <p className="mt-1 text-xs">{student.branch || "—"}</p>

@@ -563,6 +563,7 @@ async def upload_mtech(
     sem_sheet: str = Form(...),
     tc_sheet: str = Form(""),
     gs_sheet: str = Form(""),
+    student_limit: int = Form(0),
     excel: UploadFile = File(...),
     tc_pdf: Optional[UploadFile] = File(None),
     gs_pdf: Optional[UploadFile] = File(None),
@@ -617,13 +618,28 @@ async def upload_mtech(
     if not tc_records and not gs_records:
         raise HTTPException(400, "No TC or GS data found — provide either a "
                                   "tc_sheet/gs_sheet inside the Excel or a "
-                                  "tc_pdf/gs_pdf PDF.")
+                                  "tc_pdf/gs_pdf PDF. (TC will be auto-derived "
+                                  "from GS if only GS is supplied.)")
 
     # 3. Apply back markers + non-credit markers
     apply_back_markers(tc_records, back_map)
     apply_back_markers(gs_records, back_map)
     apply_non_credit_markers(tc_records)
     apply_non_credit_markers(gs_records)
+
+    # If TC records weren't supplied (or parsing failed), derive them from GS
+    # records so the M.Tech flow always produces both TC and GS PDFs.
+    if not tc_records and gs_records:
+        import copy as _copy
+        tc_records = _copy.deepcopy(gs_records)
+        log.info("TC records derived from GS (no TC source supplied) — count=%d",
+                 len(tc_records))
+
+    # Optional cap on number of students to render — drives the GS/TC volume
+    # so the admin can quickly preview a subset of records.
+    if student_limit and student_limit > 0:
+        tc_records = tc_records[:student_limit]
+        gs_records = gs_records[:student_limit]
 
     # 4. Generate fresh TC + GS PDFs for this branch
     out_files = {}
