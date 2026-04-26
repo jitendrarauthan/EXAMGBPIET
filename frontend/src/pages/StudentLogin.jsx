@@ -87,11 +87,6 @@ export default function StudentLogin() {
               )}
             </Button>
           </form>
-          <p className="text-xs text-stone-500 mt-6">
-            Tip: subjects with a <span className="subject-back text-xs mx-1">*</span>
-            marker indicate carry-over (back) papers. Contact the examination
-            cell if your roll number isn&apos;t found.
-          </p>
         </Card>
       </div>
       <PortalFooter />

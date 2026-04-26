@@ -153,6 +153,11 @@ class LoginIn(BaseModel):
     password: str
 
 
+class VerifyOtpIn(BaseModel):
+    challenge_id: str
+    otp: str
+
+
 class StudentLoginIn(BaseModel):
     roll_no: str
     dob: str = ""  # optional, kept for backwards compatibility
@@ -164,21 +169,139 @@ class DobItem(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# OTP / SMTP helpers (admin 2FA)
+# ---------------------------------------------------------------------------
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+OTP_RECIPIENT = os.environ.get("OTP_RECIPIENT", "")
+OTP_TTL_SECONDS = 600           # 10 minutes
+OTP_MAX_ATTEMPTS = 5            # per challenge
+
+
+def _send_otp_email(otp: str, to_addr: str) -> None:
+    """Send the OTP via Gmail SMTP. Raises HTTPException(503) on failure."""
+    import smtplib
+    from email.message import EmailMessage
+
+    if not (SMTP_USER and SMTP_PASSWORD and to_addr):
+        raise HTTPException(503, "SMTP is not configured")
+
+    msg = EmailMessage()
+    msg["From"] = f"GBPIET Result Portal <{SMTP_USER}>"
+    msg["To"] = to_addr
+    msg["Subject"] = "GBPIET Admin Portal — Login OTP"
+    msg.set_content(
+        "Govind Ballabh Pant Institute of Engineering and Technology\n"
+        "Result Portal — Admin Login\n\n"
+        f"Your one-time password is: {otp}\n"
+        "It is valid for 10 minutes.\n\n"
+        "If you did not initiate this login, please ignore this email and "
+        "contact the system administrator.\n"
+    )
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.ehlo()
+            s.starttls()
+            s.ehlo()
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.send_message(msg)
+    except Exception as e:
+        log.exception("SMTP send failed: %s", e)
+        raise HTTPException(503, "Failed to send OTP email — check SMTP "
+                                  "credentials / network access.")
+
+
+def _generate_otp() -> str:
+    """6-digit numeric OTP, zero-padded."""
+    import secrets
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+# ---------------------------------------------------------------------------
 # Auth endpoints
 # ---------------------------------------------------------------------------
 @api.post("/auth/login")
-async def login(body: LoginIn, response: Response):
+async def login(body: LoginIn):
+    """Step 1 of admin 2FA: validate password, mail an OTP, return a
+    short-lived challenge_id that the client must redeem with the OTP."""
     email = body.email.strip().lower()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token(user["id"], email)
+
+    otp = _generate_otp()
+    challenge_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    await db.otp_challenges.insert_one({
+        "challenge_id": challenge_id,
+        "user_id": user["id"],
+        "email": email,
+        "otp_hash": hash_password(otp),
+        "expires_at": now + timedelta(seconds=OTP_TTL_SECONDS),
+        "attempts": 0,
+        "verified": False,
+        "created_at": now,
+    })
+    # Mask the recipient for the response so the OTP is never echoed back.
+    masked = OTP_RECIPIENT
+    if "@" in masked:
+        local, _, domain = masked.partition("@")
+        masked = (local[:3] + "•••" + local[-1:] if len(local) > 4 else "••••") + "@" + domain
+    _send_otp_email(otp, OTP_RECIPIENT)
+
+    return {
+        "otp_required": True,
+        "challenge_id": challenge_id,
+        "expires_in": OTP_TTL_SECONDS,
+        "sent_to": masked,
+        "message": "An OTP has been emailed to the authorized recipient.",
+    }
+
+
+@api.post("/auth/verify-otp")
+async def verify_otp(body: VerifyOtpIn, response: Response):
+    """Step 2 of admin 2FA: redeem the OTP, issue the JWT."""
+    chal = await db.otp_challenges.find_one({"challenge_id": body.challenge_id})
+    if not chal:
+        raise HTTPException(status_code=400, detail="Invalid or expired challenge")
+    now = datetime.now(timezone.utc)
+    expires_at = chal.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+        except Exception:
+            expires_at = now - timedelta(seconds=1)
+    if chal.get("verified") or (expires_at and now > expires_at):
+        await db.otp_challenges.delete_one({"challenge_id": body.challenge_id})
+        raise HTTPException(status_code=400, detail="Invalid or expired challenge")
+    if chal.get("attempts", 0) >= OTP_MAX_ATTEMPTS:
+        await db.otp_challenges.delete_one({"challenge_id": body.challenge_id})
+        raise HTTPException(status_code=429, detail="Too many invalid OTP attempts")
+    if not verify_password((body.otp or "").strip(), chal["otp_hash"]):
+        await db.otp_challenges.update_one(
+            {"challenge_id": body.challenge_id},
+            {"$inc": {"attempts": 1}},
+        )
+        raise HTTPException(status_code=401, detail="Invalid OTP")
+
+    # Single-use: delete the challenge and issue the JWT.
+    await db.otp_challenges.delete_one({"challenge_id": body.challenge_id})
+    user = await db.users.find_one({"id": chal["user_id"]})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    token = create_token(user["id"], user["email"])
     response.set_cookie(
         "access_token", token, httponly=True, secure=True, samesite="none",
         max_age=ACCESS_MIN * 60, path="/",
     )
-    return {"id": user["id"], "email": email, "name": user.get("name", "Admin"),
-            "token": token}
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name", "Admin"),
+        "token": token,
+    }
 
 
 @api.post("/auth/logout")

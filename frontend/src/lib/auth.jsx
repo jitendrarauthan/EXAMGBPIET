@@ -25,6 +25,19 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
+    // 2FA: backend returns an OTP challenge. The caller must redeem it
+    // via verifyOtp() before a JWT is issued.
+    if (data && data.otp_required) {
+      return data; // { otp_required, challenge_id, expires_in, sent_to }
+    }
+    if (data.token) localStorage.setItem("admin_token", data.token);
+    setUser(data);
+    setReady(true);
+    return data;
+  };
+
+  const verifyOtp = async (challenge_id, otp) => {
+    const { data } = await api.post("/auth/verify-otp", { challenge_id, otp });
     if (data.token) localStorage.setItem("admin_token", data.token);
     setUser(data);
     setReady(true);
@@ -40,7 +53,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, ready, login, logout, setUser }}>
+    <AuthCtx.Provider value={{ user, ready, login, verifyOtp, logout, setUser }}>
       {children}
     </AuthCtx.Provider>
   );
