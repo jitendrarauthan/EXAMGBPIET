@@ -273,6 +273,9 @@ async def verify_otp(body: VerifyOtpIn, response: Response):
             expires_at = datetime.fromisoformat(expires_at)
         except Exception:
             expires_at = now - timedelta(seconds=1)
+    # Mongo returns datetimes as naive UTC — coerce to aware before compare.
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
     if chal.get("verified") or (expires_at and now > expires_at):
         await db.otp_challenges.delete_one({"challenge_id": body.challenge_id})
         raise HTTPException(status_code=400, detail="Invalid or expired challenge")
