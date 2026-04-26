@@ -76,31 +76,84 @@ def parse_sem_excel(file_bytes: bytes) -> Dict[str, Dict[str, Dict[str, bool]]]:
 
 def _parse_back_map_from_ws(ws) -> Dict[str, Dict[str, bool]]:
     """Shared worksheet → {roll: {subject_code: True}} parser used by both
-    the standard ``SEM_<sem>`` and the M.Tech ``SEM_<branch>`` workflows."""
+    the standard ``SEM_<sem>`` and the M.Tech ``SEM_<branch>`` workflows.
+
+    Auto-detects the header row holding subject codes (M.Tech branch sheets
+    place them on row 5 instead of row 1) and the column carrying the
+    University Roll No.
+    """
+    # 1. Locate the header row that lists the subject codes. We look for a
+    # row whose populated cells (after a leading "SC"/"M.M."/"SN" anchor)
+    # include strings that LOOK like course codes (3+ alphabetic chars then a
+    # space or dash and digits).
+    header_row = 1
+    for r in range(1, min(15, ws.max_row + 1)):
+        codes_in_row = [
+            ws.cell(r, c).value for c in range(1, ws.max_column + 1)
+            if ws.cell(r, c).value
+            and re.match(r"^[A-Z]{2,5}\s*-?\s*\d{2,4}$",
+                          str(ws.cell(r, c).value).strip(), re.I)
+        ]
+        if len(codes_in_row) >= 2:
+            header_row = r
+            break
+
+    # 2. Find the column where subject codes start
+    subj_start_col = 1
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(header_row, c).value
+        if v and re.match(r"^[A-Z]{2,5}\s*-?\s*\d{2,4}$", str(v).strip(), re.I):
+            subj_start_col = c
+            break
+
+    # 3. Build subject_code → list of column indices it spans
     subj_cols: List[Tuple[str, List[int]]] = []
     last_code: Optional[str] = None
-    for c in range(6, ws.max_column + 1):
-        v = ws.cell(1, c).value
+    for c in range(subj_start_col, ws.max_column + 1):
+        v = ws.cell(header_row, c).value
         if v and str(v).strip():
-            code = str(v).strip()
-            subj_cols.append((code, [c]))
-            last_code = code
+            txt = str(v).strip()
+            if re.match(r"^[A-Z]{2,5}\s*-?\s*\d{2,4}$", txt, re.I):
+                subj_cols.append((txt, [c]))
+                last_code = txt
+            elif subj_cols and last_code:
+                subj_cols[-1][1].append(c)
         else:
             if subj_cols and last_code:
                 subj_cols[-1][1].append(c)
+
+    # 4. Find the column carrying the University Roll No. on the data rows.
+    # In B.Tech SEM_X sheets the roll sits in col 2; in M.Tech branch sheets
+    # also col 2 (after a serial-number col 1). We just probe rows below the
+    # header to find a column with mostly numeric values >= 8 chars long.
+    roll_col = 2
+    sample_cols = [2, 3, 4]
+    for cand in sample_cols:
+        n_numeric = 0
+        for r in range(header_row + 1, min(header_row + 12, ws.max_row + 1)):
+            v = ws.cell(r, cand).value
+            if v and any(ch.isdigit() for ch in str(v)) and len(str(v).strip()) >= 8:
+                n_numeric += 1
+        if n_numeric >= 2:
+            roll_col = cand
+            break
+
+    # 5. Iterate student rows
     sem_map: Dict[str, Dict[str, bool]] = {}
-    for r in range(6, ws.max_row + 1):
-        roll = ws.cell(r, 2).value
+    for r in range(header_row + 1, ws.max_row + 1):
+        roll = ws.cell(r, roll_col).value
         if not roll:
             continue
-        roll = str(roll).strip()
+        roll_s = str(roll).strip()
+        if not any(ch.isdigit() for ch in roll_s):
+            continue
         student_back: Dict[str, bool] = {}
         for code, cols in subj_cols:
             back = any(_is_highlighted(ws.cell(r, c)) for c in cols)
             if back:
                 student_back[code] = True
         if student_back:
-            sem_map[roll] = student_back
+            sem_map[roll_s] = student_back
     return sem_map
 
 
@@ -141,11 +194,168 @@ def parse_tc_or_gs_named_sheet(file_bytes: bytes, sheet_name: str, kind: str) ->
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
     ws = wb[sheet_name]
+    # M.Tech workbooks ship the data as repeating per-student blocks anchored
+    # at a column-1 "M.M." marker. Detect that layout up front and dispatch
+    # to the dedicated block parser; otherwise fall back to the standard
+    # AIML-style sheet parsers.
+    if _looks_like_mtech_block_sheet(ws):
+        return parse_mtech_block_sheet(ws, kind)
     if kind.lower() == "tc":
         return parse_tc_excel_sheet(ws)
     if kind.lower() == "gs":
         return parse_gs_excel_sheet(ws)
     raise ValueError(f"Unknown sheet kind: {kind}")
+
+
+def _looks_like_mtech_block_sheet(ws) -> bool:
+    """Heuristic: M.Tech Marksheets / Grade Sheets sheets contain repeating
+    'M.M.' anchor rows in column 1 followed by per-student blocks. Scan the
+    first ~50 rows for any such marker."""
+    for r in range(1, min(50, ws.max_row + 1)):
+        v = ws.cell(r, 1).value
+        if v and str(v).strip().upper().startswith("M.M."):
+            return True
+    return False
+
+
+def parse_mtech_block_sheet(ws, kind: str) -> List[dict]:
+    """Parse the per-student block format used in M.Tech Marksheets and
+    Grade Sheets sheets.
+
+    Both layouts begin each student with a ``M.M.`` marker row in column 1.
+    The Marksheets layout is rich (carries external / sessional / total
+    marks); the Grade Sheets layout is leaner. We detect which one we're
+    looking at by inspecting where the student name lands relative to the
+    "Name:" label.
+    """
+    # Find every block start row
+    starts: List[int] = []
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(r, 1).value
+        if v and str(v).strip().upper().startswith("M.M."):
+            starts.append(r)
+    if not starts:
+        return []
+    starts.append(ws.max_row + 1)  # sentinel
+
+    out: List[dict] = []
+    for i in range(len(starts) - 1):
+        r0, r1 = starts[i], starts[i + 1]
+        rec = _parse_mtech_one_block(ws, r0, r1, kind)
+        if rec and rec.get("roll_no"):
+            out.append(rec)
+    return out
+
+
+def _parse_mtech_one_block(ws, r0: int, r1: int, kind: str) -> Optional[dict]:
+    """Parse a SINGLE per-student block bounded by [r0, r1) rows."""
+    rec: dict = {
+        "name": "", "father_name": "", "roll_no": "", "enroll_no": "",
+        "subjects": [],
+        "sgpa": "", "cgpa": "", "result": "", "remark": "",
+        "earned_credits": "", "cuml_earned_credits": "",
+        "program": "", "branch": "", "semester": "", "exam_session": "",
+    }
+    subj_header_row = None
+
+    def _g(r: int, c: int) -> str:
+        v = ws.cell(r, c).value
+        return "" if v is None else str(v).strip()
+
+    for r in range(r0, r1):
+        c1 = _g(r, 1)
+        if c1.lower().startswith("name:"):
+            # Marksheets layout puts name in col 2 (after "Name:" in col 1).
+            # Grade Sheets layout uses col 3 with col 1 = "Name:" and col 5
+            # holding the "University Roll No" label, so try multiple cols.
+            for c in (2, 3):
+                if _g(r, c):
+                    rec["name"] = _g(r, c)
+                    break
+            # Father / roll / enroll on the SAME row in Marksheets layout
+            for col, key in ((5, "father_name"), (9, "roll_no"), (13, "enroll_no")):
+                v = _g(r, col)
+                if v:
+                    rec[key] = v
+            # Roll usually sits at col 9 in both layouts
+            for col in (9, 6, 11):
+                if not rec["roll_no"] and _g(r, col):
+                    if any(ch.isdigit() for ch in _g(r, col)):
+                        rec["roll_no"] = _g(r, col)
+                        break
+        elif c1.lower().startswith("father"):
+            # Grade Sheets layout: father / enroll on a separate row
+            for c in (3, 2):
+                if _g(r, c):
+                    rec["father_name"] = _g(r, c)
+                    break
+            for col in (9, 11):
+                v = _g(r, col)
+                if v and "/" in v or (v and v.upper().startswith("UTU")):
+                    rec["enroll_no"] = v
+                    break
+        elif c1.lower().startswith("subject code"):
+            subj_header_row = r
+        elif c1.lower().startswith(("total credits", "total credit", "total ")):
+            # Skip — totals row
+            continue
+        elif c1.lower().startswith("result"):
+            # Marksheets layout: col2=result, col5=remark, col8=sgpa,
+            # col10=cgpa, col12=earned, col14=cuml.
+            rec["result"] = _g(r, 2)
+            rec["remark"] = _g(r, 5)
+            rec["sgpa"] = _g(r, 8)
+            rec["cgpa"] = _g(r, 10)
+            rec["earned_credits"] = _g(r, 12)
+            rec["cuml_earned_credits"] = _g(r, 14)
+        else:
+            # Subject line: only consider rows AFTER the header row, with a
+            # plausible subject-code in col 1.
+            if subj_header_row and r > subj_header_row and c1 and not c1.lower().startswith("name"):
+                # Marksheets columns: 1=code, 2=name, 6=credits, 7=external,
+                # 9=sessional, 11=total, 13=grade, 14=gp.
+                # Grade Sheets columns: 1=code, 3=name, 8=credits, 9=grade,
+                # 10=gp.
+                code = c1
+                # name column varies — pick the first non-empty in (2, 3)
+                name = _g(r, 2) or _g(r, 3)
+                # detect layout: if col 7 has a value matching N/N format -> Marksheets
+                external = _g(r, 7)
+                sessional = _g(r, 9)
+                total = _g(r, 11)
+                grade = _g(r, 13)
+                gp = _g(r, 14)
+                credits = _g(r, 6)
+                if not external or "/" not in external:
+                    # Grade Sheets layout
+                    credits = _g(r, 8) or credits
+                    grade = _g(r, 9) or grade
+                    gp = _g(r, 10) or gp
+                    external = ""
+                    sessional = ""
+                    total = ""
+                if not name:
+                    continue
+                rec["subjects"].append({
+                    "code": code,
+                    "name": name,
+                    "credits": credits,
+                    "external": external,
+                    "sessional": sessional,
+                    "total": total,
+                    "grade": grade,
+                    "grade_points": gp,
+                })
+
+    # Default ``result`` if missing — derive from grades.
+    if not rec["result"] and rec["subjects"]:
+        if any((s.get("grade") or "").upper() in ("F", "AB", "DT", "UFM")
+               for s in rec["subjects"]):
+            rec["result"] = "FAIL"
+        else:
+            rec["result"] = "PASS"
+
+    return rec if rec.get("roll_no") else None
 
 
 # ---------------------------------------------------------------------------
