@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from processor import (
     apply_back_markers,
     apply_non_credit_markers,
+    restore_external_from_total,
     generate_gs_pdf,
     generate_tc_pdf,
     parse_gs_pdf,
@@ -418,6 +419,11 @@ async def upload_excel_only(
         a2, _ = apply_back_markers(gs_records, back_map)
         apply_non_credit_markers(tc_records)
         apply_non_credit_markers(gs_records)
+        # B.Tech-only TC fix: restore external marks where they were
+        # suppressed as "-" but total > sessional (i.e. external marks
+        # actually exist and equal total - sessional).
+        if (program or "").strip().lower().startswith("b.tech"):
+            restore_external_from_total(tc_records)
         total_back_marks += a1 + a2
 
         tc_out = None

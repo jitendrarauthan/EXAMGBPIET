@@ -906,6 +906,53 @@ def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str
     return n, matched
 
 
+def restore_external_from_total(records: List[dict]) -> int:
+    """B.Tech TC fix: when a subject's external column shows a dash but the
+    total marks exceed the sessional marks, the external marks were
+    suppressed/erased in the source data even though the student actually
+    earned them. Recompute external = total - sessional.
+
+    Marks are stored as ``"a/b"`` strings (a=obtained, b=max). We only
+    restore when:
+      - external is missing / dash-like ("", "-", "—" or "-/N" form), AND
+      - sessional and total are valid ``"a/b"`` strings, AND
+      - total_obtained > sessional_obtained  (the user's trigger condition).
+
+    Non-credit subjects ($) are skipped — their external is intentionally
+    a dash per institute policy.
+    Returns the number of subjects whose external was restored.
+    """
+    fixed = 0
+    pat = re.compile(r"^\s*(-?\d+)\s*/\s*(\d+)\s*$")
+    for rec in records:
+        for s in rec.get("subjects", []):
+            if s.get("non_credit"):
+                continue
+            ext_raw = (s.get("external") or "").strip()
+            # Treat plain "-", "—", "" or "-/N" / "/N" forms as missing.
+            ext_a_present = bool(pat.match(ext_raw)) and not ext_raw.lstrip().startswith("-/")
+            if ext_a_present:
+                continue
+            ses_m = pat.match((s.get("sessional") or "").strip())
+            tot_m = pat.match((s.get("total") or "").strip())
+            if not ses_m or not tot_m:
+                continue
+            try:
+                ses_a = int(ses_m.group(1))
+                ses_b = int(ses_m.group(2))
+                tot_a = int(tot_m.group(1))
+                tot_b = int(tot_m.group(2))
+            except ValueError:
+                continue
+            if tot_a <= ses_a or tot_b <= ses_b:
+                continue
+            ext_a = tot_a - ses_a
+            ext_b = tot_b - ses_b
+            s["external"] = f"{ext_a}/{ext_b}"
+            fixed += 1
+    return fixed
+
+
 def apply_non_credit_markers(records: List[dict], branch: str = "") -> int:
     """Append ' $' to subject names whose credits are 0 / blank — these are
     non-credit subjects (e.g. General Proficiency). Idempotent.
