@@ -588,7 +588,11 @@ async def upload_excel_only(
                     tcs = tc_subj_by_code.get(key)
                     if tcs:
                         for f in ("external", "sessional", "total"):
-                            if not s.get(f):
+                            cur = (s.get(f) or "").strip()
+                            # Treat dash placeholders as missing so the TC
+                            # value (e.g. "39/50" for non-credit ($)
+                            # subjects with real external marks) wins.
+                            if cur in ("", "-", "—") and tcs.get(f):
                                 s[f] = tcs.get(f, "")
                         if tcs.get("back_pending") and not s.get("back_pending"):
                             s["back_pending"] = True
@@ -852,7 +856,8 @@ async def upload_mtech(
                 if not tcs:
                     continue
                 for f in ("external", "sessional", "total"):
-                    if not s.get(f):
+                    cur = (s.get(f) or "").strip()
+                    if cur in ("", "-", "—") and tcs.get(f):
                         s[f] = tcs.get(f, "")
                 if tcs.get("back_pending") and not s.get("back_pending"):
                     s["back_pending"] = True
