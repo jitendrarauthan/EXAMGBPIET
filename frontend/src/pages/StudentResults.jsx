@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { LogOut, Printer } from "lucide-react";
+import PortalHeader from "../components/PortalHeader";
+import PortalFooter from "../components/PortalFooter";
 
 const ROMAN_ORDER = ["VIII", "VII", "VI", "V", "IV", "III", "II", "I"];
 
@@ -110,16 +112,10 @@ export default function StudentResults() {
   });
 
   return (
-    <div className="min-h-screen bg-stone-100">
-      <header className="bg-white border-b border-stone-200 print:hidden">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
-              Govind Ballabh Pant Institute of Engineering &amp; Technology
-            </p>
-            <h1 className="font-display text-xl">Results</h1>
-          </div>
-          <div className="flex gap-2">
+    <div className="min-h-screen bg-stone-100 flex flex-col">
+      <PortalHeader
+        right={
+          <>
             <Button
               size="sm"
               variant="outline"
@@ -141,11 +137,11 @@ export default function StudentResults() {
             >
               <LogOut className="w-4 h-4 mr-2" /> Sign out
             </Button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="max-w-5xl mx-auto px-6 py-12 space-y-10">
+      <main className="max-w-5xl mx-auto px-6 py-12 space-y-10 flex-1 w-full">
         {/* Legend */}
         <Card
           data-testid="legend-card"
@@ -392,6 +388,7 @@ export default function StudentResults() {
           );
         })}
       </main>
+      <PortalFooter />
     </div>
   );
 }

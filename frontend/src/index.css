@@ -82,6 +82,21 @@ body {
 }
 
 
+/* Always hide the Emergent platform badge across the entire portal —
+   the user has explicitly asked not to surface it anywhere. */
+#emergent-badge,
+[id^="emergent-badge"],
+a[href*="emergent.app"],
+a[href*="emergent.sh"],
+a[href*="emergent.dev"],
+[class*="emergent-badge"],
+[data-emergent],
+iframe[src*="emergent"] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
 /* ----------------------------- Print styles ----------------------------- */
 @media print {
     @page {

@@ -764,15 +764,22 @@ def _draw_tc_header(canv, doc, program: str, branch: str, sem: str, session: str
     course_y = top_y - logo_size - 5 * mm
     canv.setFont("Helvetica-Bold", 14)
     canv.drawCentredString(
-        cx, course_y, f"Tabulation Chart for {program or program_short(program)}"
+        cx, course_y, f"Tabulation Chart for {program_full(program)}"
     )
-    canv.setFont("Helvetica-Bold", 12)
-    canv.drawCentredString(cx, course_y - 5.5 * mm, branch or "")
+    # For MCA, branch == programme name (single branch) — skip the duplicate
+    # branch line so the course name doesn't appear twice on the TC.
+    show_branch = bool(branch) and program_short(program) != "MCA"
+    if show_branch:
+        canv.setFont("Helvetica-Bold", 12)
+        canv.drawCentredString(cx, course_y - 5.5 * mm, branch)
+        sess_y_offset = 10.5 * mm
+    else:
+        sess_y_offset = 6 * mm
     canv.setFont("Helvetica", 11)
     sess_line = f"{sem} Semester"
     if session:
         sess_line += f"   |   {session}"
-    canv.drawCentredString(cx, course_y - 10.5 * mm, sess_line)
+    canv.drawCentredString(cx, course_y - sess_y_offset, sess_line)
 
     # Thin divider beneath header
     canv.setLineWidth(0.5)
@@ -1263,8 +1270,8 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
 
         # ---- "GRADE SHEET" header band — its own visual section ----
         title_band = Table([[Paragraph(
-            "<para alignment='center' leading='20' spaceBefore='0' spaceAfter='0'>"
-            "<font size='20' face='Helvetica-Bold' color='white'>GRADE SHEET</font>"
+            "<para alignment='center' leading='16' spaceBefore='0' spaceAfter='0'>"
+            "<font size='14' face='Helvetica-Bold' color='white'>GRADE SHEET</font>"
             "</para>",
             st["sub"],
         )]], colWidths=[content_w])
@@ -1274,25 +1281,31 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            # Add a touch more top than bottom padding so the optical cap-height
-            # (without descenders) sits visually centered.
-            ("TOPPADDING", (0, 0), (-1, -1), 12),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(title_band)
         story.append(Spacer(1, 1.5 * mm))
 
         # ---- Course / branch / semester+session — its own section ----
-        # Times-Roman (a refined serif) at larger sizes makes this band feel
-        # academic and clearly distinct from both the Algerian header and the
-        # body Helvetica.
-        course_band = Table([[Paragraph(
-            "<para alignment='center' leading='17'>"
-            f"<font size='13' face='Times-Bold' color='#1c1917'>{program}</font><br/>"
-            f"<font size='11.5' face='Times-Roman' color='#1c1917'>{branch}</font><br/>"
+        # MCA has no per-branch breakdown, so suppress the redundant branch
+        # line whenever the programme is MCA (the branch field on those records
+        # mirrors the programme label).
+        course_full = program_full(program)
+        show_branch = bool(branch) and program_short(program) != "MCA"
+        course_html = (
+            f"<font size='13' face='Times-Bold' color='#1c1917'>{course_full}</font><br/>"
+        )
+        if show_branch:
+            course_html += (
+                f"<font size='11.5' face='Times-Roman' color='#1c1917'>{branch}</font><br/>"
+            )
+        course_html += (
             f"<font size='10.5' face='Times-Italic' color='#57534e'>"
             f"{semester_roman} Semester &nbsp;&middot;&nbsp; {exam_session}</font>"
-            "</para>",
+        )
+        course_band = Table([[Paragraph(
+            f"<para alignment='center' leading='17'>{course_html}</para>",
             st["sub"],
         )]], colWidths=[content_w])
         course_band.setStyle(TableStyle([
@@ -1394,10 +1407,14 @@ def generate_gs_pdf(records: List[dict], program: str = "", branch: str = "",
         story.append(t)
         story.append(Spacer(1, 3 * mm))
 
-        # ---- Semester-wise Result — full I…VIII grid, future semesters blank ----
+        # ---- Semester-wise Result — full grid, future semesters blank ----
+        # MCA and M.Tech are 4-semester programmes; B.Tech is 8.
         roll = rec.get("roll_no", "")
         per_sem = (all_sem_summary or {}).get(roll, {})
-        sem_order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
+        if is_short_program(program):
+            sem_order = ["I", "II", "III", "IV"]
+        else:
+            sem_order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
         try:
             current_idx = sem_order.index(semester_roman)
         except ValueError:
@@ -1553,6 +1570,30 @@ def program_short(program: str) -> str:
     if "MASTER" in norm:
         return "M. TECH"
     return "PROG"
+
+
+def program_full(program: str) -> str:
+    """Return the canonical FULL human-readable course name.
+
+    Input may be either an abbreviation ('B.Tech', 'MCA', 'M.Tech') or
+    something already verbose. Always emits one of the three official course
+    titles used on every printed Grade Sheet / Tabulation Chart.
+    """
+    code = program_short(program)
+    if code == "B. TECH":
+        return "Bachelor of Technology"
+    if code == "MCA":
+        return "Master of Computer Application"
+    if code == "M. TECH":
+        return "Master of Technology"
+    # Unknown / unrecognised — keep whatever the caller passed in so we don't
+    # silently mask data, and fall back to a humanised version.
+    return program or "Programme"
+
+
+def is_short_program(program: str) -> bool:
+    """True when the programme has only 4 semesters (MCA, M.Tech)."""
+    return program_short(program) in ("MCA", "M. TECH")
 
 
 # ---------------------------------------------------------------------------

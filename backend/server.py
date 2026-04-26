@@ -266,6 +266,12 @@ async def upload_files(
 
     # 4. Persist results: prefer GS records (one per page = clean), fall back to TC
     chosen_records = gs_records if gs_records else tc_records
+    # Build a roll → gs_hash map from whichever set of records was processed
+    # by `generate_gs_pdf` (it mutates records in place adding `gs_hash`).
+    hash_by_roll = {
+        r.get("roll_no", ""): r.get("gs_hash", "")
+        for r in gs_records if r.get("gs_hash")
+    }
     students_payload = []
     for rec in chosen_records:
         students_payload.append({
@@ -304,6 +310,7 @@ async def upload_files(
                 "result": rec.get("result", ""),
                 "remark": rec.get("remark", ""),
                 "earned_credits": rec.get("earned_credits", ""),
+                "gs_hash": rec.get("gs_hash") or hash_by_roll.get(rec.get("roll_no", ""), ""),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }},
             upsert=True,

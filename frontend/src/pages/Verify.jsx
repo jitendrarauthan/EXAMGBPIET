@@ -7,6 +7,8 @@ import { Label } from "../components/ui/label";
 import { Card } from "../components/ui/card";
 import { toast } from "sonner";
 import { ShieldCheck, Loader2, ArrowLeft, BadgeCheck } from "lucide-react";
+import PortalHeader from "../components/PortalHeader";
+import PortalFooter from "../components/PortalFooter";
 
 export default function Verify() {
   const [code, setCode] = useState("");
@@ -30,23 +32,20 @@ export default function Verify() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-100">
-      <header className="bg-white border-b border-stone-200">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-stone-100 flex flex-col">
+      <PortalHeader
+        right={
           <Link
             to="/"
-            className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold hover:text-stone-800"
+            className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold hover:text-stone-800 inline-flex items-center gap-1.5"
             data-testid="verify-home-link"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back home
           </Link>
-          <p className="text-xs uppercase tracking-[0.2em] text-stone-500 font-semibold">
-            GBPIET · Grade Sheet Verification
-          </p>
-        </div>
-      </header>
+        }
+      />
 
-      <main className="max-w-3xl mx-auto px-6 py-14 space-y-10">
+      <main className="max-w-3xl mx-auto px-6 py-14 space-y-10 flex-1 w-full">
         <Card
           data-testid="verify-search-card"
           className="bg-white border border-stone-200 p-8 md:p-10 rounded-sm shadow-sm"
@@ -167,6 +166,7 @@ export default function Verify() {
           </Card>
         )}
       </main>
+      <PortalFooter />
     </div>
   );
 }
