@@ -84,7 +84,7 @@ PROGRAMS = {
         "Computer Science & Engineering",
         "Power System",
         "Geotechnology",
-        "Biotech",
+        "Biotechnology",
         "Electronics and Communication Engineering",
         "Production Engineering",
         "Thermal Engineering",
@@ -625,10 +625,8 @@ async def upload_mtech(
     # 3. Apply back markers + non-credit markers
     apply_back_markers(tc_records, back_map)
     apply_back_markers(gs_records, back_map)
-    apply_non_credit_markers(tc_records)
-    apply_non_credit_markers(gs_records)
-
-    # 3a. Branch-specific column-shift for non-credit subjects on the TC.
+    apply_non_credit_markers(tc_records, branch)
+    apply_non_credit_markers(gs_records, branch)
     # For all M.Tech branches OTHER than Biotechnology, the Marksheets
     # layout displaces sessional/total marks into the grade column and the
     # letter grade has to be derived from the grade points.

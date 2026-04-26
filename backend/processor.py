@@ -906,9 +906,17 @@ def apply_back_markers(records: List[dict], back_map_for_sem: Dict[str, Dict[str
     return n, matched
 
 
-def apply_non_credit_markers(records: List[dict]) -> int:
+def apply_non_credit_markers(records: List[dict], branch: str = "") -> int:
     """Append ' $' to subject names whose credits are 0 / blank — these are
-    non-credit subjects (e.g. General Proficiency). Idempotent."""
+    non-credit subjects (e.g. General Proficiency). Idempotent.
+
+    By default, non-credit subjects don't carry an external (theory) exam,
+    so external is forced to '-'. EXCEPTION: M.Tech Biotechnology's
+    "English for Research Writing ($)" actually has an external exam — for
+    this specific subject we keep whatever external marks the Excel
+    supplied.
+    """
+    is_biotech = "biotech" in (branch or "").strip().lower()
     n = 0
     for rec in records:
         for s in rec.get("subjects", []):
@@ -928,7 +936,15 @@ def apply_non_credit_markers(records: List[dict]) -> int:
                 # only sessional / total / grade are awarded. The Excel may
                 # still hold an "external" placeholder; replace it with a
                 # dash so the printed TC reflects institute policy.
-                s["external"] = "-"
+                # Biotechnology exception: "English for Research Writing"
+                # does carry an external exam — keep original Excel value.
+                name_norm = (s.get("name") or "").lower()
+                keep_external = (
+                    is_biotech
+                    and "english for research writing" in name_norm
+                )
+                if not keep_external:
+                    s["external"] = "-"
     return n
 
 
