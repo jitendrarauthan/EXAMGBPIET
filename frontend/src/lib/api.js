@@ -14,6 +14,29 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Auto-redirect to /admin/login when the session expires mid-action.
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const status = err?.response?.status;
+    const detail = err?.response?.data?.detail;
+    const isExpired =
+      status === 401 &&
+      typeof detail === "string" &&
+      /expired|invalid token|not authenticated|user not found/i.test(detail);
+    if (isExpired && typeof window !== "undefined") {
+      const onAdmin = window.location.pathname.startsWith("/admin");
+      if (onAdmin && window.location.pathname !== "/admin/login") {
+        localStorage.removeItem("admin_token");
+        // Toast through console — sonner not imported here.
+        console.warn("Session expired — redirecting to login.");
+        window.location.replace("/admin/login");
+      }
+    }
+    return Promise.reject(err);
+  },
+);
+
 export const fmtError = (e) => {
   const detail = e?.response?.data?.detail;
   if (detail == null) return e?.message || "Something went wrong";

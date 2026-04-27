@@ -62,7 +62,7 @@ db = client[db_name]
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
-ACCESS_MIN = 60 * 8  # 8h sessions for the admin
+ACCESS_MIN = 60 * 24  # 24h sessions for the admin
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 
